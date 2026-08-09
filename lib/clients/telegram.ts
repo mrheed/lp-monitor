@@ -46,7 +46,18 @@ const call = async (method: string, body: Record<string, unknown>) => {
   return typeof result?.message_id === 'number' ? result.message_id : null
 }
 
-/** Sends a new message and returns its id, so it can be edited later. */
+/** A failed send, carrying Telegram's own requested wait when it gave one. */
+export class TelegramError extends Error {
+  constructor(
+    message: string,
+    readonly retryAfterSeconds: number | null,
+  ) {
+    super(message)
+    this.name = 'TelegramError'
+  }
+}
+
+/** Sends a new message and returns its id, so the next one can delete it. */
 export const sendTelegramMessage = async (text: string): Promise<number | null> =>
   call('sendMessage', { text })
 
@@ -61,33 +72,6 @@ export const deleteTelegramMessage = async (messageId: number): Promise<void> =>
     await call('deleteMessage', { message_id: messageId })
   } catch {
     // Too old, already gone, or removed by hand. Nothing to recover.
-  }
-}
-
-/**
- * Replaces the text of an existing message.
- *
- * Telegram treats an edit to identical text as an error, which is not a failure worth reporting:
- * the message already says what it should. It also refuses to edit anything older than 48 hours,
- * which the caller handles by sending a fresh one.
- */
-export const editTelegramMessage = async (messageId: number, text: string): Promise<void> => {
-  try {
-    await call('editMessageText', { message_id: messageId, text })
-  } catch (error) {
-    if (error instanceof Error && /not modified/i.test(error.message)) return
-    throw error
-  }
-}
-
-/** A failed send, carrying Telegram's own requested wait when it gave one. */
-export class TelegramError extends Error {
-  constructor(
-    message: string,
-    readonly retryAfterSeconds: number | null,
-  ) {
-    super(message)
-    this.name = 'TelegramError'
   }
 }
 
