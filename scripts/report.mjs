@@ -13,8 +13,18 @@ const PORT = process.env.PORT ?? '3003'
 const BASE = process.env.TRACKER_URL ?? `http://localhost:${PORT}`
 const watch = process.argv.includes('--watch')
 
-const dim = (text) => `[2m${text}[0m`
-const bold = (text) => `[1m${text}[0m`
+/**
+ * Colour only when stdout is a terminal.
+ *
+ * Piping the report to a file or a pager should produce plain text; escape sequences there
+ * are noise that survives into whatever reads it next.
+ */
+const useColour = process.stdout.isTTY && !process.argv.includes('--no-colour')
+const wrap = (code) => (text) =>
+  useColour ? `\u001b[${code}m${text}\u001b[0m` : text
+
+const dim = wrap(2)
+const bold = wrap(1)
 
 const render = async () => {
   const response = await fetch(`${BASE}/api/alerts/report`)

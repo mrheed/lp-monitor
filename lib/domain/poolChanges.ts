@@ -77,10 +77,60 @@ export const countCell = (value: number | null): string => {
   return String(Math.round(value))
 }
 
-/** `before→after`, or just the current value when there is nothing to compare against. */
-const shift = (before: string | null, after: string) => (before === null ? after : `${before}→${after}`)
+/** Which way a figure moved, for callers that can show direction. */
+export type Direction = 'up' | 'down' | 'flat' | 'new'
 
-const pad = (value: string, width: number) => value.padEnd(width).slice(0, width)
+/** How a caller decorates a cell once it knows the direction. Plain text by default. */
+export type Decorate = (text: string, direction: Direction) => string
+
+const ARROW: Record<Direction, string> = { up: '↑', down: '↓', flat: '→', new: '' }
+
+/**
+ * Direction from the rendered values, not the raw ones.
+ *
+ * Two numbers that display identically have not moved as far as a reader is concerned, and
+ * calling that a rise because the sixth decimal changed would be noise dressed as signal.
+ */
+const directionOf = (before: string | null, after: string): Direction => {
+  if (before === null) return 'new'
+  if (before === after) return 'flat'
+
+  const a = Number(before.replace(/[^\d.-]/g, ''))
+  const b = Number(after.replace(/[^\d.-]/g, ''))
+  const scale = (text: string) => (text.includes('M') ? 1_000_000 : text.includes('k') ? 1_000 : 1)
+
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return 'flat'
+  return b * scale(after) > a * scale(before) ? 'up' : 'down'
+}
+
+/**
+ * `before↑after`, with the arrow carrying the direction.
+ *
+ * The arrow is the separator rather than an extra glyph, so direction costs no width in a table
+ * whose columns are already tight. Telegram cannot colour text at all, so this is the only way
+ * the message itself can show which way a figure went.
+ */
+const shift = (before: string | null, after: string, decorate: Decorate) => {
+  const direction = directionOf(before, after)
+  const text = before === null ? after : `${before}${ARROW[direction]}${after}`
+
+  return decorate(text, direction)
+}
+
+/**
+ * Pads to a visible width, ignoring any ANSI escapes a decorator added.
+ *
+ * `padEnd` counts every character, so colouring a cell and then padding it would shorten the
+ * visible text by the length of the escape sequence and break every column to its right.
+ */
+const pad = (value: string, width: number) => {
+  const visible = value.replace(/\u001b\[[0-9;]*m/g, '')
+  if (visible.length >= width) {
+    return visible.length === value.length ? value.slice(0, width) : value
+  }
+
+  return value + ' '.repeat(width - visible.length)
+}
 
 /** Escapes the characters Telegram's HTML parser treats as markup. */
 const escapeHtml = (value: string) =>
@@ -99,7 +149,10 @@ const escapeHtml = (value: string) =>
  * Shared by the message and the terminal so both render the same table from the same code; a
  * separate formatter for the CLI would drift from what actually gets sent.
  */
-export const changeTableLines = (rows: ChangeRow[]): string[] => {
+export const changeTableLines = (
+  rows: ChangeRow[],
+  decorate: Decorate = (text) => text,
+): string[] => {
   const listed = rows.slice(0, REPORT_LIMIT)
 
   // Several watched pools can share a pair, since ETH/USDG alone spans sixteen on this chain, so
@@ -109,14 +162,20 @@ export const changeTableLines = (rows: ChangeRow[]): string[] => {
     const fees = shift(
       row.before ? usdCell(row.before.feesPerHourUsd) : null,
       usdCell(row.after.feesPerHourUsd),
+      decorate,
     )
-    const tx = shift(row.before ? countCell(row.before.txPerHour) : null, countCell(row.after.txPerHour))
+    const tx = shift(
+      row.before ? countCell(row.before.txPerHour) : null,
+      countCell(row.after.txPerHour),
+      decorate,
+    )
     const volume = shift(
       row.before ? usdCell(row.before.volumeUsdPerHour) : null,
       usdCell(row.after.volumeUsdPerHour),
+      decorate,
     )
 
-    const tvl = shift(row.before ? usdCell(row.before.tvlUsd) : null, usdCell(row.after.tvlUsd))
+    const tvl = shift(row.before ? usdCell(row.before.tvlUsd) : null, usdCell(row.after.tvlUsd), decorate)
     const name = `${row.pair} ${row.poolId.slice(2, 8)}`
     const held = row.openHolders.length > 0 ? row.openHolders.join(', ') : '-'
 
@@ -125,6 +184,34 @@ export const changeTableLines = (rows: ChangeRow[]): string[] => {
 
   return [header, ...lines]
 }
+
+/**
+ * The comparison as a stacked block per pool, for narrow screens.
+ *
+ * The table is about eighty five characters wide, and a phone shows roughly thirty before it
+ * wraps, at which point the columns the comparison depends on are gone. Stacking each pool keeps
+ * every line under twenty five characters, so it reads on a phone without scrolling sideways.
+ *
+ * Same figures, same order, same arrows as the table; only the arrangement differs.
+ */
+export const changeBlockLines = (rows: ChangeRow[], decorate: Decorate = (text) => text): string[] =>
+  rows.slice(0, REPORT_LIMIT).flatMap((row) => {
+    const cell = (
+      before: number | null | undefined,
+      after: number | null,
+      format: (value: number | null) => string,
+    ) => shift(row.before ? format(before ?? null) : null, format(after), decorate)
+
+    const lines = [
+      `${row.pair} ${row.poolId.slice(2, 8)}`,
+      `  tvl   ${cell(row.before?.tvlUsd, row.after.tvlUsd, usdCell)}`,
+      `  fees  ${cell(row.before?.feesPerHourUsd, row.after.feesPerHourUsd, usdCell)}`,
+      `  tx    ${cell(row.before?.txPerHour, row.after.txPerHour, countCell)}`,
+      `  vol   ${cell(row.before?.volumeUsdPerHour, row.after.volumeUsdPerHour, usdCell)}`,
+    ]
+
+    return row.openHolders.length > 0 ? [...lines, `  held  ${row.openHolders.join(', ')}`] : lines
+  })
 
 /** One link per listed pool, for placing beneath the table. */
 export const changeLinkLines = (rows: ChangeRow[]): { label: string; url: string }[] =>
@@ -148,7 +235,9 @@ export const formatChangeReport = (rows: ChangeRow[], mentions: string[] = []): 
   return [
     handles || null,
     `<b>Pool update: ${rows.length} monitored</b>`,
-    `<pre>${escapeHtml(changeTableLines(rows).join('\n'))}</pre>`,
+    // Stacked rather than tabular: the message is read on a phone far more often than the
+    // terminal report is, and a wide table there loses the alignment it depends on.
+    `<pre>${escapeHtml(changeBlockLines(rows).join('\n'))}</pre>`,
     links || null,
     rest > 0 ? `…and ${rest} more not shown` : null,
   ]

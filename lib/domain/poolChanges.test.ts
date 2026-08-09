@@ -101,14 +101,16 @@ describe('formatChangeReport', () => {
   it('shows the previous and current value for each figure', () => {
     const message = formatChangeReport(rows)
 
-    expect(message).toContain('2.6k→4.1k')
-    expect(message).toContain('1.4k→2.9k')
-    expect(message).toContain('102.0k→210.0k')
+    // The separator carries direction: a rise reads with an up arrow, not a plain one.
+    expect(message).toContain('2.6k↑4.1k')
+    expect(message).toContain('1.4k↑2.9k')
+    expect(message).toContain('102.0k↑210.0k')
   })
 
-  it('renders as a fixed width block so the columns line up', () => {
+  it('renders as a preformatted block so the figures line up', () => {
+    // The message stacks each pool rather than tabulating them, because it is read on a phone.
     expect(formatChangeReport(rows)).toContain('<pre>')
-    expect(formatChangeReport(rows)).toContain('POOL')
+    expect(formatChangeReport(rows)).toContain('  fees  ')
   })
 
   it('shows only the current value when there is nothing to compare against', () => {
@@ -286,7 +288,7 @@ describe('tvl in the report', () => {
       pool('0xa', 'ETH/USDG', metrics(100, 5, 900, 610_000)),
     ])
 
-    expect(changeTableLines(rows).join('\n')).toContain('400.0k→610.0k')
+    expect(changeTableLines(rows).join('\n')).toContain('400.0k↑610.0k')
   })
 
   it('counts a move in depth as material on its own', () => {
