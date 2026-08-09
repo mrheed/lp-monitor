@@ -1,4 +1,5 @@
 import type { PoolRow } from '../types'
+import { effectiveFeesPerHourUsd } from './liveFees'
 
 /**
  * How much each factor contributes to the composite score. Weights are normalised at use, so
@@ -99,7 +100,10 @@ export const scorePools = <
   T extends Pick<
     PoolRow,
     'recentFeesPerHourUsd' | 'totalFeesUsd' | 'tvlUsd' | 'activity' | 'priceVolatility'
-  >,
+  > &
+    // Optional: a caller that has not measured a pool simply has no live figure, and the
+    // reported window stands in for it.
+    Partial<Pick<PoolRow, 'liveFeesPerHourUsd'>>,
 >(
   pools: T[],
   weights: ScoreWeights = DEFAULT_WEIGHTS,
@@ -107,10 +111,13 @@ export const scorePools = <
   // Scored on the recent fee rate, not accumulated fees: a pool that earned heavily last month
   // and nothing since should not outrank one earning now. Accumulated fees are display only.
   //
+  // The rate is the live one where a pool was measured, which spans seconds to minutes rather
+  // than the feed's shortest published hour, and falls back to the reported window otherwise.
+  //
   // Fees, TVL and trade rate span orders of magnitude, so they are scaled by magnitude and a
   // large advantage stays a large advantage. Trader count is capped by the sample size that
   // produces it, so it has no meaningful magnitude range and keeps its percentile rank.
-  const feeRanks = magnitudeScores(pools.map((pool) => pool.recentFeesPerHourUsd))
+  const feeRanks = magnitudeScores(pools.map(effectiveFeesPerHourUsd))
   const tvlRanks = magnitudeScores(pools.map((pool) => pool.tvlUsd))
   const rateRanks = magnitudeScores(pools.map((pool) => pool.activity?.transactionsPerHour ?? 0))
   const traderRanks = percentileRanks(pools.map((pool) => pool.activity?.uniqueTraders ?? 0))

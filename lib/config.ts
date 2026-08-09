@@ -86,6 +86,33 @@ export const uniswapPoolUrl = (poolAddress: string) =>
 export const TX_SAMPLE_SIZE = 25
 
 /**
+ * How far back a live measurement may reach, as selectable ceilings.
+ *
+ * The pool feed publishes nothing shorter than an hour, so anything finer has to come from the
+ * transaction stream. These are ceilings rather than fixed periods: a busy pool fits its whole
+ * sample into well under a minute and is measured over that, while a quiet pool is clipped here
+ * so hours-old trades are not reported as current.
+ *
+ * A wider ceiling is not more data, only an older bound. It admits staler trades into the
+ * average, which steadies a thin sample at the cost of lagging a pool that just turned busy.
+ */
+export const FEE_WINDOW_CEILINGS = [
+  { id: '15m', label: '15m', seconds: 15 * 60 },
+  { id: '30m', label: '30m', seconds: 30 * 60 },
+  { id: '1h', label: '1h', seconds: 60 * 60 },
+] as const
+
+export type FeeWindowId = (typeof FEE_WINDOW_CEILINGS)[number]['id']
+
+export const DEFAULT_FEE_WINDOW: FeeWindowId = '15m'
+
+const DEFAULT_CEILING_SECONDS = 15 * 60
+
+/** Resolves a window id to its ceiling in seconds, falling back to the default for anything else. */
+export const ceilingSecondsFor = (id: string | null | undefined): number =>
+  FEE_WINDOW_CEILINGS.find((window) => window.id === id)?.seconds ?? DEFAULT_CEILING_SECONDS
+
+/**
  * Simultaneous outbound requests during the frequency fan out.
  *
  * Measured at 25 transactions per page: 12 concurrent gives 5.2 requests per second, 24 gives

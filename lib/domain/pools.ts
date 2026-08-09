@@ -6,6 +6,8 @@ import {
   ACTIVITY_MAX_AGE_MS,
   ACTIVITY_POOL_LIMIT,
   CACHE_TTL_MS,
+  ceilingSecondsFor,
+  DEFAULT_FEE_WINDOW,
   krystalPoolUrl,
   trackedWallets,
   uniswapPoolUrl,
@@ -23,6 +25,7 @@ import {
 import { rankPools } from './rank'
 import { rankByScore, scorePools, type ScoreWeights } from './score'
 import { recentFeeRate } from './feeWindow'
+import { impliedFeeRate, withActivity } from './liveFees'
 import { estimatePoolAge } from './poolAge'
 import { getFirstSeen } from './alertWatcher'
 
@@ -69,12 +72,20 @@ const toRow = (
   positionHolders: PoolRow['positionHolders'],
   firstSeenAt: number | undefined,
 ): PoolRow => {
-  const recent = recentFeeRate({
+  const fees = {
     hour: pool.stat1h.feeUsd,
     day: pool.stat24h.feeUsd,
     week: pool.stat7d.feeUsd,
     month: pool.stat30d.feeUsd,
-  })
+  }
+  const volumes = {
+    hour: pool.stat1h.volumeUsd,
+    day: pool.stat24h.volumeUsd,
+    week: pool.stat7d.volumeUsd,
+    month: pool.stat30d.volumeUsd,
+  }
+
+  const recent = recentFeeRate(fees)
 
   return {
     poolId: pool.poolAddress,
@@ -95,6 +106,10 @@ const toRow = (
     totalFeesUsd: pool.stat30d.feeUsd,
     recentFeesPerHourUsd: recent.perHourUsd,
     recentFeeWindow: recent.window,
+    feeRate: impliedFeeRate(fees, volumes),
+    // Both stay null until activity arrives; the sweep fills them in when it attaches a sample.
+    liveFeesPerHourUsd: null,
+    liveFeeWindowSeconds: null,
     fees24hUsd: pool.stat24h.feeUsd,
     volume24hUsd: pool.stat24h.volumeUsd,
     volume30dUsd: pool.stat30d.volumeUsd,
@@ -128,13 +143,16 @@ const toRow = (
  * rather than every pool being measured before the page can render. Results are cached per
  * batch, so scrolling back over rows costs nothing.
  */
-export const loadActivityFor = async (targets: { poolId: string; protocol: string }[]) => {
+export const loadActivityFor = async (
+  targets: { poolId: string; protocol: string }[],
+  ceilingSeconds: number,
+) => {
   const answers = new Map<string, Activity>()
   const missing: typeof targets = []
   const stale: typeof targets = []
 
   for (const target of targets) {
-    const hit = peekWithAge<Activity>(activityKey(target.poolId))
+    const hit = peekWithAge<Activity>(activityKey(target.poolId, ceilingSeconds))
 
     if (hit === undefined) {
       missing.push(target)
@@ -148,12 +166,12 @@ export const loadActivityFor = async (targets: { poolId: string; protocol: strin
   // Anything already measured answers from cache, however old, so a request never waits on the
   // network for a pool that has a usable number. Aged entries are refreshed behind the response
   // instead, which is why the table fills instantly and then sharpens.
-  if (stale.length > 0) void refreshInBackground(stale)
+  if (stale.length > 0) void refreshInBackground(stale, ceilingSeconds)
 
   if (missing.length > 0) {
-    const fetched = await fetchActivity(missing)
+    const fetched = await fetchActivity(missing, ceilingSeconds)
     for (const [poolId, activity] of fetched) {
-      remember(activityKey(poolId), activity, ACTIVITY_CACHE_TTL_MS)
+      remember(activityKey(poolId, ceilingSeconds), activity, ACTIVITY_CACHE_TTL_MS)
       answers.set(poolId, activity)
     }
   }
@@ -161,23 +179,33 @@ export const loadActivityFor = async (targets: { poolId: string; protocol: strin
   return Object.fromEntries(answers)
 }
 
-/** Cache key for one pool's activity. Per pool, so a batch is never the unit of reuse. */
-const activityKey = (poolId: string) => `activity:${poolId.toLowerCase()}`
+/**
+ * Cache key for one pool's activity. Per pool, so a batch is never the unit of reuse.
+ *
+ * The ceiling is part of the key because it changes the answer: the same transactions clipped
+ * to 15 minutes and to an hour give different rates, and serving one for the other would show
+ * the reader a window they did not ask for.
+ */
+const activityKey = (poolId: string, ceilingSeconds: number) =>
+  `activity:${ceilingSeconds}:${poolId.toLowerCase()}`
 
 /** Pools currently being refreshed behind a response, so a slow refresh is not started twice. */
 const refreshing = new Set<string>()
 
 /** Re-measures aged pools without holding up the request that noticed they were aged. */
-const refreshInBackground = async (targets: { poolId: string; protocol: string }[]) => {
+const refreshInBackground = async (
+  targets: { poolId: string; protocol: string }[],
+  ceilingSeconds: number,
+) => {
   const due = targets.filter((target) => !refreshing.has(target.poolId.toLowerCase()))
   if (due.length === 0) return
 
   due.forEach((target) => refreshing.add(target.poolId.toLowerCase()))
 
   try {
-    const fetched = await fetchActivity(due)
+    const fetched = await fetchActivity(due, ceilingSeconds)
     for (const [poolId, activity] of fetched) {
-      remember(activityKey(poolId), activity, ACTIVITY_CACHE_TTL_MS)
+      remember(activityKey(poolId, ceilingSeconds), activity, ACTIVITY_CACHE_TTL_MS)
     }
   } catch {
     // The stale value stays served; the next request past the age threshold tries again.
@@ -227,7 +255,9 @@ const buildIndex = (sources: PositionSources, pools: PoolIdentity[]): PositionIn
  * failure in activity or positions leaves those cells blank and records a warning rather than
  * failing the whole request.
  */
-export const getPoolsSnapshot = async (): Promise<PoolsSnapshot> => {
+export const getPoolsSnapshot = async (
+  ceilingSeconds: number = ceilingSecondsFor(DEFAULT_FEE_WINDOW),
+): Promise<PoolsSnapshot> => {
   const warnings: string[] = []
 
   // The pool feed and the wallet's positions do not depend on each other, only on being
@@ -251,7 +281,7 @@ export const getPoolsSnapshot = async (): Promise<PoolsSnapshot> => {
   // Pools the watcher saw appear carry a real age; the rest fall back to the window estimate.
   const firstSeen = getFirstSeen()
 
-  const rows = pools.map((pool) =>
+  let rows = pools.map((pool) =>
     toRow(
       pool,
       positionStateFor(byPool, pool.poolAddress),
@@ -277,15 +307,14 @@ export const getPoolsSnapshot = async (): Promise<PoolsSnapshot> => {
     // share measurements instead of each paying for its own.
     const measured = await loadActivityFor(
       candidates.map(({ poolId, protocol }) => ({ poolId, protocol })),
+      ceilingSeconds,
     )
     activity = new Map(Object.entries(measured))
   } catch {
     warnings.push('Could not load transaction rates. Ranking falls back to fees and TVL only.')
   }
 
-  for (const row of rows) {
-    row.activity = activity.get(row.poolId.toLowerCase()) ?? null
-  }
+  rows = rows.map((row) => withActivity(row, activity.get(row.poolId.toLowerCase()) ?? null))
 
   // Stage two: score the measured pools on all four factors. Pools that were never measured
   // cannot be compared on rate or traders, so they are ranked below on fees and TVL alone.

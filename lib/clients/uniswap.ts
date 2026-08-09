@@ -9,6 +9,9 @@ const ENDPOINT =
 const transactionSchema = z.object({
   poolId: z.string().default(''),
   timestampMs: z.string(),
+  // Distinguishes a swap from a liquidity add or remove. Only swaps pay fees, and the feed
+  // mixes all three into one stream.
+  eventType: z.string().optional(),
   walletAddress: z.string().optional(),
   amountUsd: z.number().optional(),
 })
@@ -93,14 +96,23 @@ const mapWithConcurrency = async <TIn, TOut>(
  *
  * A pool whose request fails is omitted from the map rather than failing the batch, so the
  * table renders with a blank frequency cell instead of no table at all.
+ *
+ * `ceilingSeconds` bounds how far back a measurement may reach. The clock is read once for the
+ * whole batch so every pool in a sweep is clipped against the same instant, which keeps two
+ * pools measured seconds apart comparable.
  */
-export const fetchActivity = async (targets: ActivityTarget[]): Promise<Map<string, Activity>> => {
+export const fetchActivity = async (
+  targets: ActivityTarget[],
+  ceilingSeconds: number,
+): Promise<Map<string, Activity>> => {
+  const window = { ceilingSeconds, now: Date.now() }
+
   const entries = await mapWithConcurrency(targets, FETCH_CONCURRENCY, async (target) => {
     // One retry, because the gateway returns intermittent 5xx under a sustained sweep and a
     // single failure previously stranded that pool for the rest of the pass.
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        const activity = computeActivity(await fetchPoolTransactions(target))
+        const activity = computeActivity(await fetchPoolTransactions(target), window)
         return [target.poolId.toLowerCase(), activity] as const
       } catch {
         if (attempt === 1) return null

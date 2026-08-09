@@ -96,6 +96,19 @@ export type PoolRow = {
   recentFeesPerHourUsd: number
   /** Which window `recentFeesPerHourUsd` came from, for display. */
   recentFeeWindow: '1h' | '24h' | '7d' | '30d' | 'none'
+  /**
+   * The share of volume reaching liquidity providers, measured from the pool's own reported
+   * fees over its reported volume rather than taken from `lpFee`, which overstates a third of
+   * pools on this chain. Null when the pool has never recorded a fee.
+   */
+  feeRate: number | null
+  /**
+   * Fees per hour measured over the transaction sample, which spans far less than the feed's
+   * shortest published window. This is what the score reads when present. Null without a sample.
+   */
+  liveFeesPerHourUsd: number | null
+  /** Seconds the live figure covers, so a 40 second reading is not mistaken for a 15 minute one. */
+  liveFeeWindowSeconds: number | null
   fees24hUsd: number
   volume24hUsd: number
   volume30dUsd: number
