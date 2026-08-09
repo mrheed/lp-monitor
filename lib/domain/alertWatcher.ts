@@ -122,6 +122,15 @@ const FRESH: () => WatcherState = () => ({
  * interval, and announced the same pool again. Anchoring to the global object means a reload
  * reuses the running watcher instead of starting a rival to it.
  */
+/**
+ * One line per event worth knowing about, prefixed so it is greppable in a server log.
+ *
+ * Deliberately not per poll: a minute-by-minute heartbeat is 1,400 lines a day that nobody
+ * reads. Only starting, sending and failing are reported, which is what tells you whether
+ * alerting is alive without burying the answer.
+ */
+const log = (message: string) => console.log(`[alerts] ${message}`)
+
 const globalKey = Symbol.for('lp-tracker.alertWatcher')
 const globals = globalThis as unknown as Record<symbol, WatcherState | undefined>
 const state: WatcherState = globals[globalKey] ?? (globals[globalKey] = FRESH())
@@ -263,6 +272,7 @@ const announce = async () => {
     state.lastError = null
     state.consecutiveFailures = 0
     state.nextAttemptAt = Date.now() + ALERT_MIN_SEND_INTERVAL_MS
+    log(`sent ${batch.length} new pool${batch.length === 1 ? '' : 's'}, ${state.pending.length} queued`)
     record(toRecord(batch, state.filters.mentions, { status: 'sent' }))
   } catch (error) {
     // Left in `pending` and out of `known`, so the same pools are tried again later.
@@ -282,6 +292,7 @@ const announce = async () => {
     )
 
     state.nextAttemptAt = Date.now() + Math.max(requested, backoff)
+    log(`new pool alert failed: ${state.lastError}`)
     record(toRecord(batch, state.filters.mentions, { status: 'failed', error: state.lastError }))
   }
 
@@ -355,6 +366,7 @@ export const pollOnce = async (): Promise<void> => {
     await reportChanges(candidates)
   } catch (error) {
     state.lastError = error instanceof Error ? error.message : 'Unknown error'
+    log(`poll failed: ${state.lastError}`)
   } finally {
     state.polling = false
   }
@@ -457,12 +469,14 @@ const reportChanges = async (candidates: AlertCandidate[]) => {
     state.reportedSignature = signature
     state.lastReportAt = Date.now()
     state.lastError = null
+    log(`sent a change report for ${rows.length} watched pool${rows.length === 1 ? '' : 's'}`)
     record(toRecord(rows.map((row) => ({ pair: row.pair, poolId: row.poolId })), filters.mentions, { status: 'sent' }, 'change'))
     persist()
   } catch (error) {
     // Baseline and signature are left untouched, so the next poll retries the same comparison
     // rather than silently accepting the new state as reported.
     state.lastError = error instanceof Error ? error.message : 'Unknown error'
+    log(`change report failed: ${state.lastError}`)
     record(
       toRecord(
         rows.map((row) => ({ pair: row.pair, poolId: row.poolId })),
@@ -534,6 +548,20 @@ export const previewChangeReport = async (): Promise<{
 export const startAlertWatcher = () => {
   restore()
   if (state.timer !== null) return
+
+  const seconds = Math.round(ALERT_POLL_INTERVAL_MS / 1000)
+  const configured = telegramConfigured()
+  const { enabled, reportChanges, monitoredPoolIds } = state.filters
+
+  log(
+    `watching every ${seconds}s · telegram ${configured ? 'configured' : 'NOT configured'} · ` +
+      `new pools ${enabled ? 'on' : 'off'} · ` +
+      `changes ${reportChanges ? `on, ${monitoredPoolIds.length} watched` : 'off'}`,
+  )
+
+  if (!configured) {
+    log('set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env.local to send anything')
+  }
 
   const timer = setInterval(() => {
     void pollOnce()
