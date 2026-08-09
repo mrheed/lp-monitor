@@ -1,4 +1,3 @@
-import { ProxyAgent, fetch as undiciFetch } from 'undici'
 import { z } from 'zod'
 import { CHAIN_ID, PROTOCOL } from '../config'
 import { krystalTopPoolsSchema, type KrystalPool } from '../types'
@@ -68,41 +67,72 @@ export class ChallengeError extends Error {
   }
 }
 
+/** The little a caller needs from a response, so both fetch implementations can supply it. */
+type Fetched = {
+  ok: boolean
+  status: number
+  contentType: string
+  json: () => Promise<unknown>
+}
+
 /**
- * The proxy Krystal requests go through, when one is configured.
+ * The proxy agent, resolved once. `undefined` means not yet asked, `null` means none wanted.
  *
- * Built once and reused, because a fresh agent per request opens a fresh connection pool and
- * loses the benefit of keeping one open.
+ * A fresh agent per request opens a fresh connection pool and loses the benefit of keeping one
+ * open, so the resolution is cached either way.
+ */
+let agent: unknown | null | undefined
+
+/** True when requests are being routed somewhere other than this host. */
+export const usingProxy = () => Boolean(process.env.KRYSTAL_PROXY_URL)
+
+/**
+ * Fetches a URL, through a proxy when one is configured.
+ *
+ * undici is imported lazily rather than at the top of the file because its entry point reaches
+ * `node:console`, which the bundler cannot resolve when this module is pulled into the server
+ * instrumentation bundle. Most runs set no proxy and never load it at all.
+ *
+ * Each branch keeps its own library's types and returns the same small shape, so neither has to
+ * be cast into agreement with the other.
  *
  * Cloudflare scores the requesting IP, and a datacenter range is treated far more harshly than a
  * residential one, so the same code that works from a laptop can be challenged from a host. A
  * proxy moves where the request appears to come from, which is the part being judged.
  */
-const proxy = (() => {
-  const url = process.env.KRYSTAL_PROXY_URL
-  return url ? new ProxyAgent(url) : null
-})()
+const fetchThrough = async (url: string): Promise<Fetched> => {
+  const proxyUrl = process.env.KRYSTAL_PROXY_URL
 
-/** True when requests are being routed somewhere other than this host. */
-export const usingProxy = () => proxy !== null
+  if (!proxyUrl) {
+    const response = await fetch(url, { headers: BROWSER_HEADERS, cache: 'no-store' })
+    return {
+      ok: response.ok,
+      status: response.status,
+      contentType: response.headers.get('content-type') ?? '',
+      json: () => response.json(),
+    }
+  }
 
-/**
- * Fetches and validates JSON, failing loudly so the caller can decide how to degrade.
- *
- * A challenge page arrives as HTML with a 200 or a 403, so the status alone does not reveal it.
- * Without this check the HTML reached the schema and surfaced as an unreadable parse error about
- * a missing `result` field, which says nothing about what actually went wrong.
- */
+  const { ProxyAgent, fetch: undiciFetch } = await import('undici')
+  if (agent === undefined) agent = new ProxyAgent(proxyUrl)
+
+  const response = await undiciFetch(url, {
+    headers: BROWSER_HEADERS,
+    dispatcher: agent instanceof ProxyAgent ? agent : new ProxyAgent(proxyUrl),
+  })
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    contentType: response.headers.get('content-type') ?? '',
+    json: () => response.json(),
+  }
+}
+
 const getJson = async (url: string) => {
-  // undici's fetch is used only when proxying: it accepts a dispatcher, which the built-in one
-  // does not expose. Without a proxy the global fetch is left alone.
-  const response = proxy
-    ? await undiciFetch(url, { headers: BROWSER_HEADERS, dispatcher: proxy })
-    : await fetch(url, { headers: BROWSER_HEADERS, cache: 'no-store' })
+  const response = await fetchThrough(url)
 
-  const contentType = response.headers.get('content-type') ?? ''
-
-  if (contentType.includes('text/html')) throw new ChallengeError(url)
+  if (response.contentType.includes('text/html')) throw new ChallengeError(url)
   if (!response.ok) throw new Error(`Krystal request failed: ${response.status} ${url}`)
 
   return response.json()
