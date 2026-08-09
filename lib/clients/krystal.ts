@@ -113,7 +113,10 @@ const fetchThrough = async (url: string): Promise<Fetched> => {
     }
   }
 
-  const { ProxyAgent, fetch: undiciFetch } = await import('undici')
+  // `webpackIgnore` leaves this import alone entirely. Marking undici as a server external
+  // package was not enough: the bundler still analysed the specifier, followed it into
+  // `node:console`, and failed the instrumentation build before the watcher could start.
+  const { ProxyAgent, fetch: undiciFetch } = await import(/* webpackIgnore: true */ 'undici')
   if (agent === undefined) agent = new ProxyAgent(proxyUrl)
 
   const response = await undiciFetch(url, {
