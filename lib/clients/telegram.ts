@@ -51,6 +51,20 @@ export const sendTelegramMessage = async (text: string): Promise<number | null> 
   call('sendMessage', { text })
 
 /**
+ * Removes a message the bot sent.
+ *
+ * Telegram only permits this for the bot's own messages, and only within 48 hours. A failure is
+ * not worth reporting: the worst case is one stale message left in the chat.
+ */
+export const deleteTelegramMessage = async (messageId: number): Promise<void> => {
+  try {
+    await call('deleteMessage', { message_id: messageId })
+  } catch {
+    // Too old, already gone, or removed by hand. Nothing to recover.
+  }
+}
+
+/**
  * Replaces the text of an existing message.
  *
  * Telegram treats an edit to identical text as an error, which is not a failure worth reporting:

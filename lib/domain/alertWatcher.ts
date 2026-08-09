@@ -1,5 +1,5 @@
 import {
-  editTelegramMessage,
+  deleteTelegramMessage,
   sendTelegramMessage,
   telegramConfigured,
   TelegramError,
@@ -217,28 +217,21 @@ const record = (entry: AlertRecord) => {
 }
 
 /**
- * Posts an alert as a single message that is edited in place.
+ * Replaces an alert's single message: post the new one, then remove the old.
  *
- * Each alert keeps one message rather than adding to the chat, so a chain minting pools all day
- * leaves one entry to read instead of a wall. Telegram refuses to edit anything older than 48
- * hours, and a message can be deleted from under us, so a failed edit falls back to posting a
- * fresh one and adopting its id.
+ * Each alert still leaves exactly one message in the chat, so a chain minting pools all day does
+ * not produce a wall. Editing in place was the first approach and it fails the actual job:
+ * Telegram sends no notification for an edit, so an updated alert sat silently in place and was
+ * never seen. Reposting notifies and carries a current timestamp, which is what an alert is for.
+ *
+ * The new message goes out before the old one is removed, so a failure at either step leaves an
+ * alert in the chat rather than none.
  */
-const upsert = async (kind: 'newPool' | 'change', text: string): Promise<void> => {
-  const existing = state.messageIds[kind]
-
-  if (existing !== null) {
-    try {
-      await editTelegramMessage(existing, text)
-      return
-    } catch {
-      // Too old, or gone. Fall through and start a new one.
-      state.messageIds[kind] = null
-      if (kind === 'newPool') state.announcedInMessage = 0
-    }
-  }
+const replaceMessage = async (kind: 'newPool' | 'change', text: string): Promise<void> => {
+  const previous = state.messageIds[kind]
 
   state.messageIds[kind] = await sendTelegramMessage(text)
+  if (previous !== null) await deleteTelegramMessage(previous)
 }
 
 /**
@@ -259,7 +252,7 @@ const announce = async () => {
     // The running total keeps the edit honest: without it, replacing the text would quietly
     // discard the fact that earlier pools were announced at all.
     const total = state.announcedInMessage + batch.length
-    await upsert('newPool', formatAlert(batch, state.filters.mentions, total))
+    await replaceMessage('newPool', formatAlert(batch, state.filters.mentions, total))
     state.announcedInMessage = total
 
     for (const pool of batch) state.announced.add(pool.poolId.toLowerCase())
@@ -458,7 +451,7 @@ const reportChanges = async (candidates: AlertCandidate[]) => {
   if (!hasMaterialChange(rows, filters.minChangePercent / 100)) return
 
   try {
-    await upsert('change', formatChangeReport(rows, filters.mentions))
+    await replaceMessage('change', formatChangeReport(rows, filters.mentions))
 
     for (const pool of current) state.reported.set(pool.poolId.toLowerCase(), pool.metrics)
     state.reportedSignature = signature
