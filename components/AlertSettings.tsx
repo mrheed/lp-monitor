@@ -5,7 +5,7 @@ import type { AlertStatus } from '@/lib/domain/alertWatcher'
 import { DEFAULT_FILTERS, type AlertFilters } from '@/lib/domain/newPools'
 
 const CONTROL =
-  'rounded border border-neutral-800 bg-neutral-900 px-2.5 py-2 outline-none focus-visible:border-neutral-600 focus-visible:ring-1 focus-visible:ring-neutral-500 sm:py-1'
+  'rounded border border-line bg-surface px-2.5 py-2 outline-none focus-visible:border-line-strong focus-visible:ring-1 focus-visible:ring-accent sm:py-1'
 
 /**
  * One alerting feature: the switch that names it, the controls that qualify it, and what it is
@@ -37,29 +37,29 @@ const AlertGroup = ({
         checked={enabled}
         disabled={disabled}
         onChange={(event) => onToggle(event.target.checked)}
-        className="accent-neutral-300"
+        className="accent-[var(--accent)]"
       />
-      <span className={`text-sm ${enabled ? 'font-medium text-neutral-100' : 'text-neutral-500'}`}>
+      <span className={`text-sm ${enabled ? 'font-medium text-ink' : 'text-ink0'}`}>
         {name}
       </span>
     </label>
 
     <div
       className={`flex flex-wrap items-center gap-x-3 gap-y-2 text-sm transition-opacity ${
-        enabled ? 'text-neutral-400' : 'text-neutral-600 opacity-60'
+        enabled ? 'text-ink-muted' : 'text-ink-ghost opacity-60'
       }`}
     >
       {children}
     </div>
 
-    <p className="min-w-52 flex-1 text-[11px] leading-relaxed text-neutral-600">{note}</p>
+    <p className="min-w-52 flex-1 text-[11px] leading-relaxed text-ink-ghost">{note}</p>
   </div>
 )
 
 /** A control and its label, kept tight so the pair reads as one unit. */
 const Field = ({ label, children }: { label: string; children: ReactNode }) => (
   <label className="flex items-center gap-1.5">
-    <span className="whitespace-nowrap text-neutral-500">{label}</span>
+    <span className="whitespace-nowrap text-ink0">{label}</span>
     {children}
   </label>
 )
@@ -85,7 +85,7 @@ const NumberField = ({
       onChange={(event) => onChange(Math.max(0, Number(event.target.value) || 0))}
       className={`w-20 pr-6 ${CONTROL} tabular-nums`}
     />
-    <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-neutral-600">
+    <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-ink-ghost">
       {suffix}
     </span>
   </span>
@@ -111,7 +111,7 @@ export const AlertSettings = ({
   const watching = filters.monitoredPoolIds.length
 
   return (
-    <section className="space-y-3 rounded border border-neutral-800 bg-neutral-900/40 px-3 py-3.5 sm:px-4">
+    <section className="space-y-3 rounded border border-line bg-surface/40 px-3 py-3.5 sm:px-4">
       <AlertGroup
         name="New pools"
         enabled={filters.enabled}
@@ -172,7 +172,7 @@ export const AlertSettings = ({
               })
             }
             placeholder="any"
-            className={`w-full ${CONTROL} placeholder:text-neutral-700 sm:w-36`}
+            className={`w-full ${CONTROL} placeholder:text-ink-ghost sm:w-36`}
           />
         </Field>
       </AlertGroup>
@@ -203,8 +203,8 @@ export const AlertSettings = ({
       </AlertGroup>
 
       {/* Mention drives both features, so it sits under both rather than inside either. */}
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-neutral-800 pt-3 text-sm">
-        <span className="w-full shrink-0 text-neutral-500 sm:w-36">Mention</span>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-line pt-3 text-sm">
+        <span className="w-full shrink-0 text-ink0 sm:w-36">Mention</span>
         <input
           value={filters.mentions.join(', ')}
           onChange={(event) =>
@@ -214,10 +214,10 @@ export const AlertSettings = ({
             })
           }
           placeholder="@handle, @another"
-          className={`w-full ${CONTROL} placeholder:text-neutral-700 sm:w-64`}
+          className={`w-full ${CONTROL} placeholder:text-ink-ghost sm:w-64`}
         />
         {status?.lastError ? (
-          <span className="text-[11px] text-neutral-400">
+          <span className="text-[11px] text-ink-muted">
             Last attempt failed: {status.lastError}
           </span>
         ) : null}
@@ -239,43 +239,43 @@ const AlertHistory = ({ records }: { records: AlertStatus['history'] }) => {
   if (records.length === 0) return null
 
   return (
-    <details className="group border-t border-neutral-800 pt-3">
-      <summary className="cursor-pointer list-none text-[11px] text-neutral-500 hover:text-neutral-300">
-        <span className="underline decoration-neutral-800 underline-offset-2">
+    <details className="group border-t border-line pt-3">
+      <summary className="cursor-pointer list-none text-[11px] text-ink0 hover:text-ink-muted">
+        <span className="underline decoration-line underline-offset-2">
           {records.length} recent alert{records.length === 1 ? '' : 's'}
         </span>
-        <span className="ml-1 text-neutral-700 group-open:hidden">show</span>
-        <span className="ml-1 hidden text-neutral-700 group-open:inline">hide</span>
+        <span className="ml-1 text-ink-ghost group-open:hidden">show</span>
+        <span className="ml-1 hidden text-ink-ghost group-open:inline">hide</span>
       </summary>
 
-      <ul className="mt-2.5 space-y-1.5 border-l border-neutral-800 pl-3 text-[11px]">
+      <ul className="mt-2.5 space-y-1.5 border-l border-line pl-3 text-[11px]">
         {records.map((entry) => (
           <li key={`${entry.at}-${entry.status}`} className="flex flex-wrap items-baseline gap-x-2">
-            <span className="tabular-nums text-neutral-600">
+            <span className="tabular-nums text-ink-ghost">
               {new Date(entry.at).toLocaleString()}
             </span>
             <span
               className={
                 entry.status === 'sent'
-                  ? 'text-neutral-400'
-                  : 'rounded-sm border border-neutral-700 px-1 uppercase tracking-wide text-neutral-500'
+                  ? 'text-ink-muted'
+                  : 'rounded-sm border border-line-strong px-1 uppercase tracking-wide text-ink0'
               }
             >
               {entry.status === 'sent'
                 ? `${entry.poolCount} pool${entry.poolCount === 1 ? '' : 's'}`
                 : 'failed'}
             </span>
-            <span className="text-neutral-700">
+            <span className="text-ink-ghost">
               {entry.kind === 'change' ? 'change' : 'new'}
             </span>
-            <span className="text-neutral-500">{entry.pairs.join(', ')}</span>
+            <span className="text-ink0">{entry.pairs.join(', ')}</span>
             {entry.poolCount > entry.pairs.length ? (
-              <span className="text-neutral-700">+{entry.poolCount - entry.pairs.length} more</span>
+              <span className="text-ink-ghost">+{entry.poolCount - entry.pairs.length} more</span>
             ) : null}
             {entry.mentions.length > 0 ? (
-              <span className="text-neutral-700">{entry.mentions.join(' ')}</span>
+              <span className="text-ink-ghost">{entry.mentions.join(' ')}</span>
             ) : null}
-            {entry.error ? <span className="text-neutral-600">{entry.error}</span> : null}
+            {entry.error ? <span className="text-ink-ghost">{entry.error}</span> : null}
           </li>
         ))}
       </ul>

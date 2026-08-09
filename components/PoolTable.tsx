@@ -56,7 +56,7 @@ const rate = (perHour: number) => {
   return '0'
 }
 
-const missing = <span className="text-neutral-700">—</span>
+const missing = <span className="text-ink-ghost">—</span>
 
 /**
  * Row treatment for a pool you hold or have held.
@@ -70,15 +70,15 @@ const missing = <span className="text-neutral-700">—</span>
  */
 /** The card equivalent of the row rule: held pools stay findable without a left border. */
 const CARD_TONE: Record<PositionState, string> = {
-  open: 'border-l-2 border-l-neutral-200 bg-neutral-900/60',
-  closed: 'border-l-2 border-l-neutral-700 bg-neutral-900/25',
-  none: 'bg-neutral-900/20',
+  open: 'border-l-2 border-l-accent bg-surface/60',
+  closed: 'border-l-2 border-l-accent-dim bg-surface/25',
+  none: 'bg-surface/20',
 }
 
 const ROW_TONE: Record<PositionState, string> = {
-  open: 'border-l-2 border-neutral-200 bg-neutral-900/60 hover:bg-neutral-900',
-  closed: 'border-l-2 border-neutral-700 bg-neutral-900/25 hover:bg-neutral-900/70',
-  none: 'border-l-2 border-transparent hover:bg-neutral-900/60',
+  open: 'border-l-2 border-accent bg-surface/60 hover:bg-surface',
+  closed: 'border-l-2 border-accent-dim bg-surface/25 hover:bg-surface/70',
+  none: 'border-l-2 border-transparent hover:bg-surface/60',
 }
 
 /** How often the panel re-reads the watcher's state. */
@@ -107,21 +107,31 @@ const CELL = 'px-2.5 py-2.5'
 const AT_LG = 'hidden lg:table-cell'
 const AT_XL = 'hidden xl:table-cell'
 const AT_2XL = 'hidden 2xl:table-cell'
-const CELL_EDGE = 'border-l border-neutral-900 py-2.5 pl-5 pr-2.5'
-const GROUP_EDGE = 'border-l border-neutral-800 pl-5 pr-2.5'
+const CELL_EDGE = 'border-l border-line py-2.5 pl-5 pr-2.5'
+const GROUP_EDGE = 'border-l border-line pl-5 pr-2.5'
 
 /*
  * Type scale, three steps at roughly a 1.17 ratio: 14px for the value a reader is scanning for,
  * 12px for supporting values, 11px for the labels under them. Replaces the arbitrary mix of
  * text-sm, text-xs, 10px and 11px that gave every cell the same voice.
  */
-const SUB = 'text-[11px] uppercase tracking-wide text-neutral-600'
+const SUB = 'text-[11px] uppercase tracking-wide text-ink-ghost'
 
 const LINK =
-  'rounded-sm text-neutral-400 underline decoration-neutral-800 underline-offset-2 transition-colors hover:text-neutral-100 hover:decoration-neutral-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-neutral-500'
+  'rounded-sm text-ink-muted underline decoration-line underline-offset-2 transition-colors hover:text-ink hover:decoration-accent-dim focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent'
 
 /** Column count, used by the empty state's spanning cell. */
 const TABLE_COLUMNS = 18
+
+/**
+ * Volatility as a status colour.
+ *
+ * Banded rather than continuous, because a reader distinguishes three states at a glance and not
+ * thirty. The number stays beside it, so the colour speeds up scanning without being the only
+ * thing that carries the value.
+ */
+const volatilityTone = (percent: number) =>
+  percent >= 60 ? 'text-risk' : percent >= 25 ? 'text-caution' : 'text-ink-muted'
 
 /** Reads the value a sort key refers to, unwrapping activity and inverting the ascending keys. */
 const sortValue = (row: PoolRow, key: SortKey, depositUsd: number) => {
@@ -187,21 +197,21 @@ const PositionChip = ({
       <span
         className={
           open
-            ? 'inline-block rounded-sm bg-neutral-200 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-900'
-            : 'inline-block rounded-sm border border-neutral-700 px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-neutral-400'
+            ? 'inline-block rounded-sm bg-accent px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-accent-ink'
+            : 'inline-block rounded-sm border border-line-strong px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-ink-muted'
         }
       >
         {open ? 'In' : 'Past'}
       </span>
       {via === 'vault' ? (
-        <span className="text-[11px] uppercase tracking-wide text-neutral-600">vault</span>
+        <span className="text-[11px] uppercase tracking-wide text-ink-ghost">vault</span>
       ) : null}
       {showNames
         ? holders.map((holder) => (
             <span
               key={holder.address}
               className={`text-[11px] ${
-                holder.state === 'open' ? 'text-neutral-400' : 'text-neutral-600 line-through'
+                holder.state === 'open' ? 'text-ink-muted' : 'text-ink-ghost line-through'
               }`}
             >
               {holder.label}
@@ -216,7 +226,7 @@ const PositionChip = ({
  * Composite score, carried as the row's lead.
  *
  * The score is the one number the ranking exists to express, so it takes the largest numeral on
- * the row while the supporting measures were stepped back to neutral-500. Amplifying it meant
+ * the row while the supporting measures were stepped back. Amplifying it meant
  * turning up weight and size the surface already uses, not adding colour: on a table read for
  * comparison, a hue would encode a judgement the score has already made.
  */
@@ -230,13 +240,13 @@ const ScoreCell = ({ row }: { row: PoolRow }) => {
 
   return (
     <div className="flex items-center justify-end gap-2.5" title={detail}>
-      <div className="h-1 w-12 overflow-hidden rounded-full bg-neutral-800">
+      <div className="h-1 w-12 overflow-hidden rounded-full bg-surface-raised">
         <div
-          className="h-full rounded-full bg-neutral-200 transition-[width] duration-300 ease-out"
+          className="score-bar h-full rounded-full transition-[width] duration-300 ease-out"
           style={{ width: `${row.score * 100}%` }}
         />
       </div>
-      <span className="w-8 text-right text-base font-medium tabular-nums leading-none text-neutral-50">
+      <span className="w-8 text-right text-base font-medium tabular-nums leading-none text-ink">
         {(row.score * 100).toFixed(0)}
       </span>
     </div>
@@ -256,7 +266,7 @@ const CountdownRing = ({ fraction }: { fraction: number }) => {
 
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true" className="shrink-0">
-      <circle cx="9" cy="9" r={radius} fill="none" stroke="currentColor" strokeWidth="2" className="text-neutral-800" />
+      <circle cx="9" cy="9" r={radius} fill="none" stroke="currentColor" strokeWidth="2" className="text-line-strong" />
       <circle
         cx="9"
         cy="9"
@@ -265,7 +275,7 @@ const CountdownRing = ({ fraction }: { fraction: number }) => {
         stroke="currentColor"
         strokeWidth="2"
         strokeLinecap="round"
-        className="text-neutral-400"
+        className="text-ink-muted"
         strokeDasharray={circumference}
         strokeDashoffset={circumference * (1 - fraction)}
         transform="rotate(-90 9 9)"
@@ -304,7 +314,7 @@ const SweepProgress = ({
 
   if (done) {
     return (
-      <div className="text-xs text-neutral-600">
+      <div className="text-xs text-ink-ghost">
         {measured.toLocaleString()} of {total.toLocaleString()} pools scored
         {unmeasurable > 0
           ? `, ${unmeasurable.toLocaleString()} unavailable upstream after ${SWEEP_MAX_ATTEMPTS} attempts`
@@ -320,14 +330,14 @@ const SweepProgress = ({
   return (
     <div className="space-y-1.5">
       <div className="flex items-baseline justify-between text-xs">
-        <span className="text-neutral-400">
+        <span className="text-ink-muted">
           Measuring pools: {measured.toLocaleString()} of {target.toLocaleString()}
           {unmeasurable > 0 ? `, ${unmeasurable.toLocaleString()} unavailable` : null}
         </span>
-        <span className="tabular-nums text-neutral-600">{percent}%</span>
+        <span className="tabular-nums text-ink-ghost">{percent}%</span>
       </div>
       <div
-        className="h-1 w-full overflow-hidden rounded-sm bg-neutral-900"
+        className="h-1 w-full overflow-hidden rounded-sm bg-surface"
         role="progressbar"
         aria-valuenow={percent}
         aria-valuemin={0}
@@ -335,11 +345,11 @@ const SweepProgress = ({
         aria-label="Measuring pool activity"
       >
         <div
-          className="h-full bg-neutral-400 transition-[width] duration-500 ease-out"
+          className="h-full bg-accent-dim transition-[width] duration-500 ease-out"
           style={{ width: `${percent}%` }}
         />
       </div>
-      <p className="text-[11px] text-neutral-600">
+      <p className="text-[11px] text-ink-ghost">
         Scores rank each pool against the pools measured so far, so the ordering keeps changing
         until this completes.
       </p>
@@ -348,10 +358,18 @@ const SweepProgress = ({
 }
 
 /** A labelled figure inside a card, so a value is never orphaned from its name. */
-const CardStat = ({ label, children }: { label: string; children: ReactNode }) => (
+const CardStat = ({
+  label,
+  children,
+  tone = 'text-ink',
+}: {
+  label: string
+  children: ReactNode
+  tone?: string
+}) => (
   <div className="min-w-0">
-    <div className="text-[11px] uppercase tracking-wide text-neutral-600">{label}</div>
-    <div className="truncate tabular-nums text-neutral-200">{children}</div>
+    <div className="text-[11px] uppercase tracking-wide text-ink-ghost">{label}</div>
+    <div className={`truncate tabular-nums ${tone}`}>{children}</div>
   </div>
 )
 
@@ -380,11 +398,11 @@ const PoolCard = ({
   const sim = simulateFeeShare(depositUsd, row.tvlUsd, row.recentFeesPerHourUsd)
 
   return (
-    <li className={`rounded border border-neutral-900 px-3.5 py-3 ${CARD_TONE[row.position]}`}>
+    <li className={`rounded border border-line px-3.5 py-3 ${CARD_TONE[row.position]}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="text-base font-medium text-neutral-100">{row.pair}</span>
+            <span className="text-base font-medium text-ink">{row.pair}</span>
             <PositionChip
               state={row.position}
               via={row.positionVia}
@@ -392,14 +410,14 @@ const PoolCard = ({
               multipleWalletsTracked={showWalletNames}
             />
           </div>
-          <div className="mt-0.5 font-mono text-[11px] text-neutral-600">
+          <div className="mt-0.5 font-mono text-[11px] text-ink-ghost">
             {row.poolId.slice(0, 10)}…{row.poolId.slice(-6)}
           </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-3">
           {row.score !== null ? (
-            <span className="text-lg font-medium tabular-nums leading-none text-neutral-50">
+            <span className="text-lg font-medium tabular-nums leading-none text-accent">
               {(row.score * 100).toFixed(0)}
             </span>
           ) : null}
@@ -410,16 +428,16 @@ const PoolCard = ({
               checked={watched}
               onChange={() => onToggleWatch(row.poolId)}
               aria-label={`Watch ${row.pair} for changes`}
-              className="accent-neutral-300"
+              className="accent-[var(--accent)]"
             />
           </label>
         </div>
       </div>
 
       <div className="mt-3 grid grid-cols-3 gap-x-3 gap-y-2.5 text-sm">
-        <CardStat label="Fee rate">{`${usd(row.recentFeesPerHourUsd)}/h`}</CardStat>
+        <CardStat label="Fee rate" tone="text-gain">{`${usd(row.recentFeesPerHourUsd)}/h`}</CardStat>
         <CardStat label="Pool TVL">{usd(row.tvlUsd)}</CardStat>
-        <CardStat label="My APR">
+        <CardStat label="My APR" tone="text-gain">
           {sim.aprPercent >= 1000
             ? `${(sim.aprPercent / 1000).toFixed(1)}k%`
             : `${sim.aprPercent.toFixed(0)}%`}
@@ -427,12 +445,14 @@ const PoolCard = ({
         <CardStat label="Tx rate">
           {row.activity ? rate(row.activity.transactionsPerHour) : missing}
         </CardStat>
-        <CardStat label="Volatility">{`${row.priceVolatility.toFixed(1)}%`}</CardStat>
+        <CardStat label="Volatility" tone={volatilityTone(row.priceVolatility)}>
+          {`${row.priceVolatility.toFixed(1)}%`}
+        </CardStat>
         <CardStat label="Age">{row.age}</CardStat>
       </div>
 
       <div className="mt-3 flex items-center justify-between text-xs">
-        <span className="text-neutral-600">
+        <span className="text-ink-ghost">
           #{rank} · {row.dynamicFee ? 'dynamic' : `${row.feeTier}%`}
           {row.hasHook ? ' · hook' : ''}
         </span>
@@ -440,7 +460,7 @@ const PoolCard = ({
           <a href={row.krystalUrl} target="_blank" rel="noreferrer" className={LINK}>
             Krystal
           </a>
-          <span className="mx-1.5 text-neutral-800">/</span>
+          <span className="mx-1.5 text-line-strong">/</span>
           <a href={row.uniswapUrl} target="_blank" rel="noreferrer" className={LINK}>
             Uniswap
           </a>
@@ -831,7 +851,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
   // py-2 on touch widths keeps every control at a usable target height; the desktop density
   // returns from sm up, where a pointer makes a shorter control fine.
   const control =
-    'rounded border border-neutral-800 bg-neutral-900 px-3 py-2 outline-none focus-visible:border-neutral-600 focus-visible:ring-1 focus-visible:ring-neutral-500 sm:py-1.5'
+    'rounded border border-line bg-surface px-3 py-2 outline-none focus-visible:border-line-strong focus-visible:ring-1 focus-visible:ring-accent sm:py-1.5'
 
   const secondsUntilRefresh = Math.max(0, Math.ceil(remainingMs / 1000))
 
@@ -847,7 +867,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Filter by pair or pool id"
-          className={`w-full sm:w-52 ${control} placeholder:text-neutral-600`}
+          className={`w-full sm:w-52 ${control} placeholder:text-ink-ghost`}
         />
         <select value={minTvl} onChange={(e) => setMinTvl(Number(e.target.value))} className={control}>
           <option value={0}>Any TVL</option>
@@ -874,22 +894,22 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
             </option>
           ))}
         </select>
-        <label className="flex cursor-pointer select-none items-center gap-2 pl-1 text-neutral-400 hover:text-neutral-300">
+        <label className="flex cursor-pointer select-none items-center gap-2 pl-1 text-ink-muted hover:text-ink-muted">
           <input
             type="checkbox"
             checked={onlyMine}
             onChange={(event) => setOnlyMine(event.target.checked)}
-            className="accent-neutral-400"
+            className="accent-[var(--accent)]"
           />
           Only pools I have held
         </label>
 
-        <span aria-hidden="true" className="mx-1 h-5 w-px bg-neutral-800" />
+        <span aria-hidden="true" className="mx-1 h-5 w-px bg-surface-raised" />
 
-        <label className="flex items-center gap-2 text-neutral-400">
-          <span className="text-neutral-500">Deposit</span>
+        <label className="flex items-center gap-2 text-ink-muted">
+          <span className="text-ink0">Deposit</span>
           <span className="relative">
-            <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-600">
+            <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-ghost">
               $
             </span>
             <input
@@ -905,7 +925,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
 
         {staleSince === null ? null : (
           <span
-            className="w-full text-xs text-neutral-400 sm:ml-auto sm:w-auto"
+            className="w-full text-xs text-ink-muted sm:ml-auto sm:w-auto"
             role="status"
             title="The last refresh failed. The figures below are from the last successful load."
           >
@@ -913,7 +933,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
           </span>
         )}
         <span
-          className={`${staleSince === null ? 'ml-auto' : ''} tabular-nums text-neutral-500`}
+          className={`${staleSince === null ? 'ml-auto' : ''} tabular-nums text-ink0`}
         >
           {onScreen.length} of {visible.length}
         </span>
@@ -928,7 +948,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
           }
           // Deliberately never disabled: a press during a refresh is what cancels it and starts
           // again, so greying the control out would block the one interaction it exists for.
-          className={`flex items-center gap-2 ${control} tabular-nums text-neutral-300 hover:border-neutral-600 hover:text-neutral-100`}
+          className={`flex items-center gap-2 ${control} tabular-nums text-ink-muted hover:border-line-strong hover:text-ink`}
         >
           <CountdownRing fraction={refreshing ? 1 : remainingMs / REFRESH_INTERVAL_MS} />
           {refreshing ? 'Refreshing' : `Refresh ${secondsUntilRefresh}s`}
@@ -960,9 +980,9 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
           />
         ))}
         {visible.length === 0 ? (
-          <li className="rounded border border-neutral-900 px-4 py-10 text-center">
-            <p className="text-sm text-neutral-400">No pools match these filters.</p>
-            <p className="mx-auto mt-2 max-w-xs text-xs leading-relaxed text-neutral-600">
+          <li className="rounded border border-line px-4 py-10 text-center">
+            <p className="text-sm text-ink-muted">No pools match these filters.</p>
+            <p className="mx-auto mt-2 max-w-xs text-xs leading-relaxed text-ink-ghost">
               {rows.length.toLocaleString()} pools are loaded.{' '}
               {onlyMine
                 ? 'Only pools you have held are shown; clear that to widen the search.'
@@ -974,7 +994,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
         ) : null}
       </ul>
 
-      <div className="hidden overflow-x-auto rounded border border-neutral-800 md:block">
+      <div className="hidden overflow-x-auto rounded border border-line md:block">
         <table className="w-full min-w-[720px] text-sm lg:min-w-[980px] xl:min-w-[1200px] 2xl:min-w-[1540px]">
           {/*
             Two header tiers because seventeen flat columns hid five families. The upper tier
@@ -982,8 +1002,8 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
             column carries the grouping so the reader can aim at a region instead of counting
             columns. TVL sits beside the projection because the projection is derived from it.
           */}
-          <thead className="sticky top-0 z-10 bg-neutral-900 text-left">
-            <tr className="hidden text-[11px] uppercase tracking-[0.08em] text-neutral-600 2xl:table-row">
+          <thead className="sticky top-0 z-10 bg-surface text-left">
+            <tr className="hidden text-[11px] uppercase tracking-[0.08em] text-ink-ghost 2xl:table-row">
               <th className="border-l-2 border-transparent px-2.5 pb-1 pt-3 font-medium" colSpan={5} />
               <th className={`${GROUP_EDGE} pb-1 pt-3 text-right font-medium`} colSpan={2}>
                 Earnings
@@ -999,7 +1019,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
               </th>
               <th className={`${GROUP_EDGE} pb-1 pt-3 font-medium`} colSpan={2} />
             </tr>
-            <tr className="border-b border-neutral-800 text-[11px] uppercase tracking-[0.06em] text-neutral-500 [&>th]:pt-3 2xl:[&>th]:pt-0">
+            <tr className="border-b border-line text-[11px] uppercase tracking-[0.06em] text-ink0 [&>th]:pt-3 2xl:[&>th]:pt-0">
               <th className="border-l-2 border-transparent px-2.5 pb-2.5 font-medium" title="Watch for changes">
                 Watch
               </th>
@@ -1026,8 +1046,8 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
             {visible.length === 0 ? (
               <tr>
                 <td colSpan={TABLE_COLUMNS} className="px-5 py-14 text-center">
-                  <p className="text-sm text-neutral-400">No pools match these filters.</p>
-                  <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-neutral-600">
+                  <p className="text-sm text-ink-muted">No pools match these filters.</p>
+                  <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-ink-ghost">
                     {rows.length.toLocaleString()} pools are loaded.{' '}
                     {onlyMine
                       ? 'Only pools you have held are shown; clear that to widen the search.'
@@ -1044,7 +1064,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
               return (
                 <tr
                   key={row.poolId}
-                  className={`border-t border-neutral-900 transition-colors duration-150 ${ROW_TONE[row.position]}`}
+                  className={`border-t border-line transition-colors duration-150 ${ROW_TONE[row.position]}`}
                 >
                   <td className={CELL}>
                     <label
@@ -1056,11 +1076,11 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
                         checked={watched.has(row.poolId.toLowerCase())}
                         onChange={() => toggleWatch(row.poolId)}
                         aria-label={`Watch ${row.pair} for changes`}
-                        className="accent-neutral-300"
+                        className="accent-[var(--accent)]"
                       />
                     </label>
                   </td>
-                  <td className={`${AT_XL} ${CELL} text-neutral-600`}>{index + 1}</td>
+                  <td className={`${AT_XL} ${CELL} text-ink-ghost`}>{index + 1}</td>
                   <td className={CELL}>
                     <ScoreCell row={row} />
                   </td>
@@ -1073,13 +1093,13 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
                     />
                   </td>
                   <td className={CELL}>
-                    <div className="font-medium text-neutral-100">{row.pair}</div>
+                    <div className="font-medium text-ink">{row.pair}</div>
                     <div className={`${SUB} font-mono normal-case tracking-normal`}>
                       {row.poolId.slice(0, 10)}…{row.poolId.slice(-6)}
                     </div>
                   </td>
 
-                  <td className={`${CELL_EDGE} text-right tabular-nums text-neutral-100`}>
+                  <td className={`${CELL_EDGE} text-right tabular-nums text-gain`}>
                     <span title={`Measured over the ${row.recentFeeWindow} window`}>
                       {row.recentFeeWindow === 'none'
                         ? missing
@@ -1087,36 +1107,36 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
                     </span>
                     <div className={SUB}>{row.recentFeeWindow}</div>
                   </td>
-                  <td className={`${AT_XL} ${CELL} text-right tabular-nums text-neutral-500`}>
+                  <td className={`${AT_XL} ${CELL} text-right tabular-nums text-ink0`}>
                     {usd(row.totalFeesUsd)}
                   </td>
 
-                  <td className={`${CELL_EDGE} text-right tabular-nums text-neutral-300`}>
+                  <td className={`${CELL_EDGE} text-right tabular-nums text-ink-muted`}>
                     {usd(row.tvlUsd)}
                   </td>
                   <td
-                    className={`${AT_2XL} ${CELL} text-right tabular-nums text-neutral-500`}
+                    className={`${AT_2XL} ${CELL} text-right tabular-nums text-ink0`}
                     title={`A $${depositUsd.toLocaleString()} deposit would be ${(sim.share * 100).toFixed(1)}% of the pool once added to it`}
                   >
                     {(sim.share * 100).toFixed(sim.share < 0.01 ? 2 : 1)}%
                   </td>
-                  <td className={`${AT_2XL} ${CELL} text-right tabular-nums text-neutral-300`}>
+                  <td className={`${AT_2XL} ${CELL} text-right tabular-nums text-ink-muted`}>
                     {usd(sim.feesPerDayUsd)}
                     <div className={SUB}>per day</div>
                   </td>
-                  <td className={`${CELL} text-right tabular-nums text-neutral-100`}>
+                  <td className={`${CELL} text-right tabular-nums text-gain`}>
                     {sim.aprPercent >= 1000
                       ? `${(sim.aprPercent / 1000).toFixed(1)}k%`
                       : `${sim.aprPercent.toFixed(0)}%`}
                   </td>
 
-                  <td className={`${AT_LG} ${CELL_EDGE} text-right tabular-nums text-neutral-300`}>
+                  <td className={`${AT_LG} ${CELL_EDGE} text-right tabular-nums text-ink-muted`}>
                     {row.activity ? rate(row.activity.transactionsPerHour) : missing}
                   </td>
-                  <td className={`${AT_2XL} ${CELL} text-right tabular-nums text-neutral-300`}>
+                  <td className={`${AT_2XL} ${CELL} text-right tabular-nums text-ink-muted`}>
                     {row.activity ? `${usd(row.activity.volumeUsdPerHour)}/h` : missing}
                   </td>
-                  <td className={`${AT_XL} ${CELL} text-right tabular-nums text-neutral-500`}>
+                  <td className={`${AT_XL} ${CELL} text-right tabular-nums text-ink0`}>
                     {row.activity ? row.activity.uniqueTraders : missing}
                   </td>
 
@@ -1125,16 +1145,18 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
                     title={`24h drawdown ${row.drawdown24h.toFixed(1)}%`}
                   >
                     {/* Krystal reports both of these already expressed as percentages. */}
-                    <span className="text-neutral-300">{row.priceVolatility.toFixed(1)}%</span>
+                    <span className={volatilityTone(row.priceVolatility)}>
+                      {row.priceVolatility.toFixed(1)}%
+                    </span>
                     <div className={`${SUB} normal-case`}>{row.drawdown24h.toFixed(1)}% dd</div>
                   </td>
-                  <td className={`${AT_LG} ${CELL} whitespace-nowrap text-xs text-neutral-500`}>{row.age}</td>
+                  <td className={`${AT_LG} ${CELL} whitespace-nowrap text-xs text-ink0`}>{row.age}</td>
 
-                  <td className={`${AT_LG} ${CELL_EDGE} whitespace-nowrap text-xs text-neutral-400`}>
+                  <td className={`${AT_LG} ${CELL_EDGE} whitespace-nowrap text-xs text-ink-muted`}>
                     <span title={`LP fee ${row.lpFee}%, total swap fee ${row.feeTier}%`}>
                       {row.dynamicFee ? 'dynamic' : `${row.feeTier}%`}
                     </span>
-                    {row.hasHook ? <span className="ml-1 text-neutral-600">hook</span> : null}
+                    {row.hasHook ? <span className="ml-1 text-ink-ghost">hook</span> : null}
                   </td>
                   <td className={`${CELL} whitespace-nowrap text-xs`}>
                     <a
@@ -1145,7 +1167,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
                     >
                       Krystal
                     </a>
-                    <span className="mx-1.5 text-neutral-800">/</span>
+                    <span className="mx-1.5 text-line-strong">/</span>
                     <a
                       href={row.uniswapUrl}
                       target="_blank"
@@ -1162,7 +1184,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
         </table>
       </div>
 
-      <div ref={sentinel} className="h-8 text-center text-xs text-neutral-600">
+      <div ref={sentinel} className="h-8 text-center text-xs text-ink-ghost">
         {visibleCount < visible.length ? 'Scroll for more rows' : 'End of results'}
       </div>
     </div>

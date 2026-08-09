@@ -2,11 +2,67 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Colour roles for a dark trading surface.
+ *
+ * Declared in OKLCH so lightness and chroma move predictably: every accent here sits in a narrow
+ * lightness band, which is what keeps them equally legible against the canvas instead of one
+ * hue shouting over the others.
+ *
+ * Colour encodes action, selection and status only. It is never the sole carrier of meaning:
+ * every tinted figure still shows its own number, so the table reads without colour vision.
+ */
 :root {
   color-scheme: dark;
+
+  /* Surfaces, from the canvas up. Elevation is lightness, not shadow. */
+  --canvas: oklch(0.155 0.008 250);
+  --surface: oklch(0.19 0.009 250);
+  --surface-raised: oklch(0.225 0.01 250);
+
+  /* Text, from primary down to the faintest legible label. */
+  --ink: oklch(0.96 0.005 250);
+  --ink-muted: oklch(0.74 0.012 250);
+  /* Lifted from where they started: the 11px labels these drive are body text by WCAG, and at
+     the original lightness they sat at 2.5:1, which is decoration rather than text. */
+  --ink-faint: oklch(0.66 0.013 250);
+  --ink-ghost: oklch(0.605 0.014 250);
+
+  --line: oklch(0.27 0.012 250);
+  --line-strong: oklch(0.36 0.016 250);
+
+  /*
+   * The accent means "this one, and mine": focus, selection, a held position, a watched pool.
+   * Kept to those jobs so it still registers when it appears.
+   */
+  --accent: oklch(0.78 0.13 200);
+  --accent-dim: oklch(0.64 0.09 200);
+  --accent-ink: oklch(0.17 0.02 200);
+
+  /* Status. Green earns, amber warns, red is where capital gets hurt. */
+  --gain: oklch(0.79 0.15 155);
+  --caution: oklch(0.82 0.14 80);
+  --risk: oklch(0.7 0.18 25);
 }
 
 body {
-  @apply bg-neutral-950 text-neutral-200 antialiased;
+  background: var(--canvas);
+  color: var(--ink-muted);
   font-feature-settings: 'tnum' 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * The score ramp.
+ *
+ * A sequential scale rather than a categorical one, because the score is a magnitude. Hue moves
+ * from the accent through to nothing as the score falls, so a strong pool is visible in a column
+ * of weak ones without reading a single digit.
+ */
+.score-bar {
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklch, var(--accent) 55%, var(--ink-ghost)),
+    var(--accent)
+  );
 }
