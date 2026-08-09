@@ -237,6 +237,10 @@ export const getPoolsSnapshot = async (): Promise<PoolsSnapshot> => {
     loadPositionSources(warnings),
   ])
 
+  if (pools.length === 0) {
+    warnings.push('The pool feed returned nothing. The upstream API may be rejecting this host.')
+  }
+
   const identities: PoolIdentity[] = pools.map((pool) => ({ poolId: pool.poolAddress }))
   const { byPool } = buildIndex(positionSources, identities)
 

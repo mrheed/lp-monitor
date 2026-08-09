@@ -237,6 +237,12 @@ These are all verified against the live APIs, and each one fails silently rather
   is therefore estimated from how far back the cumulative volume windows extend.
 - **`pool_detail` ignores `includeTicks`.** It returns 1.1KB with no tick array. It does carry
   token balances and USD prices, which `top_pools` leaves blank.
+- **The API sits behind Cloudflare.** A challenge arrives as HTML with either a 200 or a 403, so
+  the status alone does not reveal it; unchecked, the HTML reaches the schema and surfaces as a
+  parse error about a missing `result` field, which says nothing about the cause. Requests carry
+  browser headers, and a challenge is detected by content type and named as such. Datacenter IPs
+  are challenged far more readily than residential ones, so a host that works locally can fail
+  when deployed.
 - **The dashboard is a single page app.** Every path returns 200, including nonsense ones, so
   status codes prove nothing about a URL format. The link template came from the app bundle.
 

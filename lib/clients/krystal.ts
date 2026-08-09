@@ -40,14 +40,47 @@ const vaultDetailSchema = z.object({
     .transform((rows) => rows ?? []),
 })
 
-/** Fetches and validates JSON, failing loudly so the caller can decide how to degrade. */
-const getJson = async (url: string) => {
-  const response = await fetch(url, {
-    headers: { accept: 'application/json' },
-    cache: 'no-store',
-  })
+/**
+ * Headers a browser would send.
+ *
+ * The API sits behind Cloudflare, which scores a bare request more harshly than one that looks
+ * like the dashboard's own. This does not defeat a challenge, but it avoids inviting one.
+ */
+const BROWSER_HEADERS = {
+  accept: 'application/json, text/plain, */*',
+  'accept-language': 'en-US,en;q=0.9',
+  origin: 'https://defi.krystal.app',
+  referer: 'https://defi.krystal.app/',
+  'user-agent':
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36',
+}
 
+/** Raised when Cloudflare answers with a challenge instead of the API. */
+export class ChallengeError extends Error {
+  constructor(url: string) {
+    super(
+      `Krystal returned a Cloudflare challenge rather than data (${url}). ` +
+        'This usually means the host IP is being challenged; datacenter ranges are treated ' +
+        'more harshly than residential ones.',
+    )
+    this.name = 'ChallengeError'
+  }
+}
+
+/**
+ * Fetches and validates JSON, failing loudly so the caller can decide how to degrade.
+ *
+ * A challenge page arrives as HTML with a 200 or a 403, so the status alone does not reveal it.
+ * Without this check the HTML reached the schema and surfaced as an unreadable parse error about
+ * a missing `result` field, which says nothing about what actually went wrong.
+ */
+const getJson = async (url: string) => {
+  const response = await fetch(url, { headers: BROWSER_HEADERS, cache: 'no-store' })
+  const contentType = response.headers.get('content-type') ?? ''
+
+  if (contentType.includes('text/html')) throw new ChallengeError(url)
   if (!response.ok) throw new Error(`Krystal request failed: ${response.status} ${url}`)
+
   return response.json()
 }
 
