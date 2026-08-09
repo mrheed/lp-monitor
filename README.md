@@ -237,7 +237,11 @@ These are all verified against the live APIs, and each one fails silently rather
   is therefore estimated from how far back the cumulative volume windows extend.
 - **`pool_detail` ignores `includeTicks`.** It returns 1.1KB with no tick array. It does carry
   token balances and USD prices, which `top_pools` leaves blank.
-- **The API sits behind Cloudflare.** A challenge arrives as HTML with either a 200 or a 403, so
+- **The API sits behind Cloudflare, and it scores the requesting IP.** A datacenter range is
+  challenged far more readily than a residential one, so the same code that works from a laptop
+  can be blocked from a host. Set `KRYSTAL_PROXY_URL` to route Krystal requests through a proxy;
+  the Uniswap endpoints are unaffected and always go direct.
+- **A challenge is not distinguishable by status.** A challenge arrives as HTML with either a 200 or a 403, so
   the status alone does not reveal it; unchecked, the HTML reaches the schema and surfaces as a
   parse error about a missing `result` field, which says nothing about the cause. Requests carry
   browser headers, and a challenge is detected by content type and named as such. Datacenter IPs

@@ -1,3 +1,4 @@
+import { ProxyAgent, fetch as undiciFetch } from 'undici'
 import { z } from 'zod'
 import { CHAIN_ID, PROTOCOL } from '../config'
 import { krystalTopPoolsSchema, type KrystalPool } from '../types'
@@ -60,12 +61,30 @@ export class ChallengeError extends Error {
   constructor(url: string) {
     super(
       `Krystal returned a Cloudflare challenge rather than data (${url}). ` +
-        'This usually means the host IP is being challenged; datacenter ranges are treated ' +
-        'more harshly than residential ones.',
+        'The host IP is being challenged; datacenter ranges are treated far more harshly than ' +
+        'residential ones. Set KRYSTAL_PROXY_URL to route these requests elsewhere.',
     )
     this.name = 'ChallengeError'
   }
 }
+
+/**
+ * The proxy Krystal requests go through, when one is configured.
+ *
+ * Built once and reused, because a fresh agent per request opens a fresh connection pool and
+ * loses the benefit of keeping one open.
+ *
+ * Cloudflare scores the requesting IP, and a datacenter range is treated far more harshly than a
+ * residential one, so the same code that works from a laptop can be challenged from a host. A
+ * proxy moves where the request appears to come from, which is the part being judged.
+ */
+const proxy = (() => {
+  const url = process.env.KRYSTAL_PROXY_URL
+  return url ? new ProxyAgent(url) : null
+})()
+
+/** True when requests are being routed somewhere other than this host. */
+export const usingProxy = () => proxy !== null
 
 /**
  * Fetches and validates JSON, failing loudly so the caller can decide how to degrade.
@@ -75,7 +94,12 @@ export class ChallengeError extends Error {
  * a missing `result` field, which says nothing about what actually went wrong.
  */
 const getJson = async (url: string) => {
-  const response = await fetch(url, { headers: BROWSER_HEADERS, cache: 'no-store' })
+  // undici's fetch is used only when proxying: it accepts a dispatcher, which the built-in one
+  // does not expose. Without a proxy the global fetch is left alone.
+  const response = proxy
+    ? await undiciFetch(url, { headers: BROWSER_HEADERS, dispatcher: proxy })
+    : await fetch(url, { headers: BROWSER_HEADERS, cache: 'no-store' })
+
   const contentType = response.headers.get('content-type') ?? ''
 
   if (contentType.includes('text/html')) throw new ChallengeError(url)
