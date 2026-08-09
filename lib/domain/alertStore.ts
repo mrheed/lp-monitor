@@ -1,4 +1,6 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+// Imported as `fs` rather than `node:fs`: the bundler compiles this module for every runtime,
+// including the edge one that has no filesystem, and refuses to resolve the `node:` scheme there.
+import { readFileSync, writeFileSync } from 'fs'
 import { DEFAULT_FILTERS, type AlertFilters } from './newPools'
 
 /** One announcement attempt, kept so the UI can show what was sent and when. */
