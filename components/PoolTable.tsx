@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ACTIVITY_BATCH_SIZE,
   ACTIVITY_PARALLEL_BATCHES,
@@ -68,6 +68,13 @@ const missing = <span className="text-neutral-700">—</span>
  *
  * The rule occupies the same width in every row, transparent when unheld, so no row shifts.
  */
+/** The card equivalent of the row rule: held pools stay findable without a left border. */
+const CARD_TONE: Record<PositionState, string> = {
+  open: 'border-l-2 border-l-neutral-200 bg-neutral-900/60',
+  closed: 'border-l-2 border-l-neutral-700 bg-neutral-900/25',
+  none: 'bg-neutral-900/20',
+}
+
 const ROW_TONE: Record<PositionState, string> = {
   open: 'border-l-2 border-neutral-200 bg-neutral-900/60 hover:bg-neutral-900',
   closed: 'border-l-2 border-neutral-700 bg-neutral-900/25 hover:bg-neutral-900/70',
@@ -86,6 +93,20 @@ const ALERT_STATUS_POLL_MS = 15_000
  * so proximity carries meaning instead of a border around everything.
  */
 const CELL = 'px-2.5 py-2.5'
+
+/*
+ * Column priority.
+ *
+ * Eighteen columns do not fit a laptop, let alone a phone. Rather than shrinking them all, each
+ * column declares the width at which it earns its place: identity and the figures a decision
+ * turns on are always present, supporting detail appears as the viewport allows.
+ *
+ * Below `md` the table is replaced entirely by cards, because a row scrolled sideways with no
+ * anchor is not a table, it is a maze.
+ */
+const AT_LG = 'hidden lg:table-cell'
+const AT_XL = 'hidden xl:table-cell'
+const AT_2XL = 'hidden 2xl:table-cell'
 const CELL_EDGE = 'border-l border-neutral-900 py-2.5 pl-5 pr-2.5'
 const GROUP_EDGE = 'border-l border-neutral-800 pl-5 pr-2.5'
 
@@ -323,6 +344,109 @@ const SweepProgress = ({
         until this completes.
       </p>
     </div>
+  )
+}
+
+/** A labelled figure inside a card, so a value is never orphaned from its name. */
+const CardStat = ({ label, children }: { label: string; children: ReactNode }) => (
+  <div className="min-w-0">
+    <div className="text-[11px] uppercase tracking-wide text-neutral-600">{label}</div>
+    <div className="truncate tabular-nums text-neutral-200">{children}</div>
+  </div>
+)
+
+/**
+ * One pool as a card, for widths where a table cannot work.
+ *
+ * A phone cannot show eighteen columns, and a row scrolled sideways with nothing anchoring it is
+ * unreadable. The card keeps the same information in the same priority order the table uses, but
+ * stacked: verdict and identity first, then the figures a decision turns on, then the rest.
+ */
+const PoolCard = ({
+  row,
+  rank,
+  depositUsd,
+  watched,
+  onToggleWatch,
+  showWalletNames,
+}: {
+  row: PoolRow
+  rank: number
+  depositUsd: number
+  watched: boolean
+  onToggleWatch: (poolId: string) => void
+  showWalletNames: boolean
+}) => {
+  const sim = simulateFeeShare(depositUsd, row.tvlUsd, row.recentFeesPerHourUsd)
+
+  return (
+    <li className={`rounded border border-neutral-900 px-3.5 py-3 ${CARD_TONE[row.position]}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-base font-medium text-neutral-100">{row.pair}</span>
+            <PositionChip
+              state={row.position}
+              via={row.positionVia}
+              holders={row.positionHolders}
+              multipleWalletsTracked={showWalletNames}
+            />
+          </div>
+          <div className="mt-0.5 font-mono text-[11px] text-neutral-600">
+            {row.poolId.slice(0, 10)}…{row.poolId.slice(-6)}
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-3">
+          {row.score !== null ? (
+            <span className="text-lg font-medium tabular-nums leading-none text-neutral-50">
+              {(row.score * 100).toFixed(0)}
+            </span>
+          ) : null}
+          {/* A 44px target, because a checkbox sized for a mouse is not tappable. */}
+          <label className="-m-3 flex h-11 w-11 cursor-pointer items-center justify-center p-3">
+            <input
+              type="checkbox"
+              checked={watched}
+              onChange={() => onToggleWatch(row.poolId)}
+              aria-label={`Watch ${row.pair} for changes`}
+              className="accent-neutral-300"
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-x-3 gap-y-2.5 text-sm">
+        <CardStat label="Fee rate">{`${usd(row.recentFeesPerHourUsd)}/h`}</CardStat>
+        <CardStat label="Pool TVL">{usd(row.tvlUsd)}</CardStat>
+        <CardStat label="My APR">
+          {sim.aprPercent >= 1000
+            ? `${(sim.aprPercent / 1000).toFixed(1)}k%`
+            : `${sim.aprPercent.toFixed(0)}%`}
+        </CardStat>
+        <CardStat label="Tx rate">
+          {row.activity ? rate(row.activity.transactionsPerHour) : missing}
+        </CardStat>
+        <CardStat label="Volatility">{`${row.priceVolatility.toFixed(1)}%`}</CardStat>
+        <CardStat label="Age">{row.age}</CardStat>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between text-xs">
+        <span className="text-neutral-600">
+          #{rank} · {row.dynamicFee ? 'dynamic' : `${row.feeTier}%`}
+          {row.hasHook ? ' · hook' : ''}
+        </span>
+        <span className="whitespace-nowrap">
+          <a href={row.krystalUrl} target="_blank" rel="noreferrer" className={LINK}>
+            Krystal
+          </a>
+          <span className="mx-1.5 text-neutral-800">/</span>
+          <a href={row.uniswapUrl} target="_blank" rel="noreferrer" className={LINK}>
+            Uniswap
+          </a>
+        </span>
+      </div>
+    </li>
   )
 }
 
@@ -704,8 +828,10 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
 
   // Focus is a visible ring, not just a border tint: a one-step border shift is invisible to a
   // keyboard user moving through seven controls.
+  // py-2 on touch widths keeps every control at a usable target height; the desktop density
+  // returns from sm up, where a pointer makes a shorter control fine.
   const control =
-    'rounded border border-neutral-800 bg-neutral-900 px-3 py-1.5 outline-none focus-visible:border-neutral-600 focus-visible:ring-1 focus-visible:ring-neutral-500'
+    'rounded border border-neutral-800 bg-neutral-900 px-3 py-2 outline-none focus-visible:border-neutral-600 focus-visible:ring-1 focus-visible:ring-neutral-500 sm:py-1.5'
 
   const secondsUntilRefresh = Math.max(0, Math.ceil(remainingMs / 1000))
 
@@ -721,7 +847,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Filter by pair or pool id"
-          className={`w-52 ${control} placeholder:text-neutral-600`}
+          className={`w-full sm:w-52 ${control} placeholder:text-neutral-600`}
         />
         <select value={minTvl} onChange={(e) => setMinTvl(Number(e.target.value))} className={control}>
           <option value={0}>Any TVL</option>
@@ -772,14 +898,14 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
               step={100}
               value={depositUsd}
               onChange={(event) => setDepositUsd(Math.max(0, Number(event.target.value) || 0))}
-              className={`w-28 pl-5 ${control} tabular-nums`}
+              className={`w-24 pl-5 ${control} tabular-nums sm:w-28`}
             />
           </span>
         </label>
 
         {staleSince === null ? null : (
           <span
-            className="ml-auto text-xs text-neutral-400"
+            className="w-full text-xs text-neutral-400 sm:ml-auto sm:w-auto"
             role="status"
             title="The last refresh failed. The figures below are from the last successful load."
           >
@@ -819,8 +945,37 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
         total={rows.length}
       />
 
-      <div className="overflow-x-auto rounded border border-neutral-800">
-        <table className="w-full min-w-[1540px] text-sm">
+      {/* Below md the table is replaced rather than squeezed: eighteen columns scrolled
+          sideways with no anchor is not a table anyone can read. */}
+      <ul className="space-y-2 md:hidden">
+        {onScreen.map((row, index) => (
+          <PoolCard
+            key={row.poolId}
+            row={row}
+            rank={index + 1}
+            depositUsd={depositUsd}
+            watched={watched.has(row.poolId.toLowerCase())}
+            onToggleWatch={toggleWatch}
+            showWalletNames={walletCount > 1}
+          />
+        ))}
+        {visible.length === 0 ? (
+          <li className="rounded border border-neutral-900 px-4 py-10 text-center">
+            <p className="text-sm text-neutral-400">No pools match these filters.</p>
+            <p className="mx-auto mt-2 max-w-xs text-xs leading-relaxed text-neutral-600">
+              {rows.length.toLocaleString()} pools are loaded.{' '}
+              {onlyMine
+                ? 'Only pools you have held are shown; clear that to widen the search.'
+                : minTvl > 0
+                  ? `The TVL floor of $${minTvl.toLocaleString()} may be excluding them.`
+                  : 'Try a shorter search term, or a different protocol.'}
+            </p>
+          </li>
+        ) : null}
+      </ul>
+
+      <div className="hidden overflow-x-auto rounded border border-neutral-800 md:block">
+        <table className="w-full min-w-[720px] text-sm lg:min-w-[980px] xl:min-w-[1200px] 2xl:min-w-[1540px]">
           {/*
             Two header tiers because seventeen flat columns hid five families. The upper tier
             names the family, the lower names the measure, and a hairline at each family's first
@@ -828,7 +983,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
             columns. TVL sits beside the projection because the projection is derived from it.
           */}
           <thead className="sticky top-0 z-10 bg-neutral-900 text-left">
-            <tr className="text-[11px] uppercase tracking-[0.08em] text-neutral-600">
+            <tr className="hidden text-[11px] uppercase tracking-[0.08em] text-neutral-600 2xl:table-row">
               <th className="border-l-2 border-transparent px-2.5 pb-1 pt-3 font-medium" colSpan={5} />
               <th className={`${GROUP_EDGE} pb-1 pt-3 text-right font-medium`} colSpan={2}>
                 Earnings
@@ -844,26 +999,26 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
               </th>
               <th className={`${GROUP_EDGE} pb-1 pt-3 font-medium`} colSpan={2} />
             </tr>
-            <tr className="border-b border-neutral-800 text-[11px] uppercase tracking-[0.06em] text-neutral-500">
+            <tr className="border-b border-neutral-800 text-[11px] uppercase tracking-[0.06em] text-neutral-500 [&>th]:pt-3 2xl:[&>th]:pt-0">
               <th className="border-l-2 border-transparent px-2.5 pb-2.5 font-medium" title="Watch for changes">
                 Watch
               </th>
-              <th className="px-2.5 pb-2.5 font-medium">#</th>
+              <th className={`${AT_XL} px-2.5 pb-2.5 font-medium`}>#</th>
               <th className="px-2.5 pb-2.5 text-right font-medium">Score</th>
               <th className="px-2.5 pb-2.5 font-medium">Pos</th>
               <th className="px-2.5 pb-2.5 font-medium">Pair</th>
               <th className={`${GROUP_EDGE} pb-2.5 text-right font-medium`}>Rate</th>
-              <th className="px-2.5 pb-2.5 text-right font-medium">Total</th>
+              <th className={`${AT_XL} px-2.5 pb-2.5 text-right font-medium`}>Total</th>
               <th className={`${GROUP_EDGE} pb-2.5 text-right font-medium`}>Pool TVL</th>
-              <th className="px-2.5 pb-2.5 text-right font-medium">My share</th>
-              <th className="px-2.5 pb-2.5 text-right font-medium">My fees</th>
+              <th className={`${AT_2XL} px-2.5 pb-2.5 text-right font-medium`}>My share</th>
+              <th className={`${AT_2XL} px-2.5 pb-2.5 text-right font-medium`}>My fees</th>
               <th className="px-2.5 pb-2.5 text-right font-medium">My APR</th>
-              <th className={`${GROUP_EDGE} pb-2.5 text-right font-medium`}>Tx rate</th>
-              <th className="px-2.5 pb-2.5 text-right font-medium">Vol rate</th>
-              <th className="px-2.5 pb-2.5 text-right font-medium">Traders</th>
-              <th className={`${GROUP_EDGE} pb-2.5 text-right font-medium`}>Volatility</th>
-              <th className="px-2.5 pb-2.5 font-medium">Age</th>
-              <th className={`${GROUP_EDGE} pb-2.5 font-medium`}>Fee</th>
+              <th className={`${AT_LG} ${GROUP_EDGE} pb-2.5 text-right font-medium`}>Tx rate</th>
+              <th className={`${AT_2XL} px-2.5 pb-2.5 text-right font-medium`}>Vol rate</th>
+              <th className={`${AT_XL} px-2.5 pb-2.5 text-right font-medium`}>Traders</th>
+              <th className={`${AT_LG} ${GROUP_EDGE} pb-2.5 text-right font-medium`}>Volatility</th>
+              <th className={`${AT_LG} px-2.5 pb-2.5 font-medium`}>Age</th>
+              <th className={`${AT_LG} ${GROUP_EDGE} pb-2.5 font-medium`}>Fee</th>
               <th className="px-2.5 pb-2.5 font-medium">Links</th>
             </tr>
           </thead>
@@ -892,16 +1047,20 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
                   className={`border-t border-neutral-900 transition-colors duration-150 ${ROW_TONE[row.position]}`}
                 >
                   <td className={CELL}>
-                    <input
-                      type="checkbox"
-                      checked={watched.has(row.poolId.toLowerCase())}
-                      onChange={() => toggleWatch(row.poolId)}
-                      aria-label={`Watch ${row.pair} for changes`}
+                    <label
+                      className="-m-2 flex h-9 w-9 cursor-pointer items-center justify-center p-2"
                       title={`Watch ${row.pair} for changes`}
-                      className="accent-neutral-300"
-                    />
+                    >
+                      <input
+                        type="checkbox"
+                        checked={watched.has(row.poolId.toLowerCase())}
+                        onChange={() => toggleWatch(row.poolId)}
+                        aria-label={`Watch ${row.pair} for changes`}
+                        className="accent-neutral-300"
+                      />
+                    </label>
                   </td>
-                  <td className={`${CELL} text-neutral-600`}>{index + 1}</td>
+                  <td className={`${AT_XL} ${CELL} text-neutral-600`}>{index + 1}</td>
                   <td className={CELL}>
                     <ScoreCell row={row} />
                   </td>
@@ -928,7 +1087,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
                     </span>
                     <div className={SUB}>{row.recentFeeWindow}</div>
                   </td>
-                  <td className={`${CELL} text-right tabular-nums text-neutral-500`}>
+                  <td className={`${AT_XL} ${CELL} text-right tabular-nums text-neutral-500`}>
                     {usd(row.totalFeesUsd)}
                   </td>
 
@@ -936,12 +1095,12 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
                     {usd(row.tvlUsd)}
                   </td>
                   <td
-                    className={`${CELL} text-right tabular-nums text-neutral-500`}
+                    className={`${AT_2XL} ${CELL} text-right tabular-nums text-neutral-500`}
                     title={`A $${depositUsd.toLocaleString()} deposit would be ${(sim.share * 100).toFixed(1)}% of the pool once added to it`}
                   >
                     {(sim.share * 100).toFixed(sim.share < 0.01 ? 2 : 1)}%
                   </td>
-                  <td className={`${CELL} text-right tabular-nums text-neutral-300`}>
+                  <td className={`${AT_2XL} ${CELL} text-right tabular-nums text-neutral-300`}>
                     {usd(sim.feesPerDayUsd)}
                     <div className={SUB}>per day</div>
                   </td>
@@ -951,27 +1110,27 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
                       : `${sim.aprPercent.toFixed(0)}%`}
                   </td>
 
-                  <td className={`${CELL_EDGE} text-right tabular-nums text-neutral-300`}>
+                  <td className={`${AT_LG} ${CELL_EDGE} text-right tabular-nums text-neutral-300`}>
                     {row.activity ? rate(row.activity.transactionsPerHour) : missing}
                   </td>
-                  <td className={`${CELL} text-right tabular-nums text-neutral-300`}>
+                  <td className={`${AT_2XL} ${CELL} text-right tabular-nums text-neutral-300`}>
                     {row.activity ? `${usd(row.activity.volumeUsdPerHour)}/h` : missing}
                   </td>
-                  <td className={`${CELL} text-right tabular-nums text-neutral-500`}>
+                  <td className={`${AT_XL} ${CELL} text-right tabular-nums text-neutral-500`}>
                     {row.activity ? row.activity.uniqueTraders : missing}
                   </td>
 
                   <td
-                    className={`${CELL_EDGE} text-right tabular-nums`}
+                    className={`${AT_LG} ${CELL_EDGE} text-right tabular-nums`}
                     title={`24h drawdown ${row.drawdown24h.toFixed(1)}%`}
                   >
                     {/* Krystal reports both of these already expressed as percentages. */}
                     <span className="text-neutral-300">{row.priceVolatility.toFixed(1)}%</span>
                     <div className={`${SUB} normal-case`}>{row.drawdown24h.toFixed(1)}% dd</div>
                   </td>
-                  <td className={`${CELL} whitespace-nowrap text-xs text-neutral-500`}>{row.age}</td>
+                  <td className={`${AT_LG} ${CELL} whitespace-nowrap text-xs text-neutral-500`}>{row.age}</td>
 
-                  <td className={`${CELL_EDGE} whitespace-nowrap text-xs text-neutral-400`}>
+                  <td className={`${AT_LG} ${CELL_EDGE} whitespace-nowrap text-xs text-neutral-400`}>
                     <span title={`LP fee ${row.lpFee}%, total swap fee ${row.feeTier}%`}>
                       {row.dynamicFee ? 'dynamic' : `${row.feeTier}%`}
                     </span>

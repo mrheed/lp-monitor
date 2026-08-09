@@ -55,6 +55,30 @@ the only factors known for all 2,600, and picks which are worth measuring. The s
 scores the measured ones on all four. Unmeasured pools rank below, since they cannot be
 compared on rate or traders.
 
+## Responsive behaviour
+
+The table is a wide-viewport view, not the only view. Below `md` it is replaced by cards rather
+than squeezed: eighteen columns scrolled sideways with nothing anchoring the row is not a table
+anyone can read. A card keeps the same information in the same priority order, stacked.
+
+From `md` up, each column declares the width at which it earns its place. Identity and the
+figures a decision turns on are always present; supporting detail appears as the viewport
+allows, so the table fits without horizontal scrolling at each step.
+
+| Width | Columns |
+|---|---|
+| under `md` | cards, no table |
+| `md` | 9 |
+| `lg` | 13 |
+| `xl` | 16 |
+| `2xl` | all 18, plus the column-family header |
+
+The family header row appears only at `2xl`, because `colSpan` is a fixed attribute and cannot
+follow a column hidden by CSS; showing it earlier would misalign the labels from their columns.
+
+Controls carry a taller hit area below `sm`, and the watch checkboxes sit inside a 36 to 44px
+target, since a checkbox sized for a pointer is not tappable.
+
 ## Loading
 
 Rendering and measuring are separate. The table renders ten rows at a time and adds more as you

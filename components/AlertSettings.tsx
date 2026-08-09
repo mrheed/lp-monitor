@@ -5,7 +5,7 @@ import type { AlertStatus } from '@/lib/domain/alertWatcher'
 import { DEFAULT_FILTERS, type AlertFilters } from '@/lib/domain/newPools'
 
 const CONTROL =
-  'rounded border border-neutral-800 bg-neutral-900 px-2.5 py-1 outline-none focus-visible:border-neutral-600 focus-visible:ring-1 focus-visible:ring-neutral-500'
+  'rounded border border-neutral-800 bg-neutral-900 px-2.5 py-2 outline-none focus-visible:border-neutral-600 focus-visible:ring-1 focus-visible:ring-neutral-500 sm:py-1'
 
 /**
  * One alerting feature: the switch that names it, the controls that qualify it, and what it is
@@ -31,7 +31,7 @@ const AlertGroup = ({
   note: ReactNode
 }) => (
   <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2">
-    <label className="flex w-36 shrink-0 cursor-pointer select-none items-center gap-2">
+    <label className="flex w-full shrink-0 cursor-pointer select-none items-center gap-2 sm:w-36">
       <input
         type="checkbox"
         checked={enabled}
@@ -111,7 +111,7 @@ export const AlertSettings = ({
   const watching = filters.monitoredPoolIds.length
 
   return (
-    <section className="space-y-3 rounded border border-neutral-800 bg-neutral-900/40 px-4 py-3.5">
+    <section className="space-y-3 rounded border border-neutral-800 bg-neutral-900/40 px-3 py-3.5 sm:px-4">
       <AlertGroup
         name="New pools"
         enabled={filters.enabled}
@@ -172,7 +172,7 @@ export const AlertSettings = ({
               })
             }
             placeholder="any"
-            className={`w-36 ${CONTROL} placeholder:text-neutral-700`}
+            className={`w-full ${CONTROL} placeholder:text-neutral-700 sm:w-36`}
           />
         </Field>
       </AlertGroup>
@@ -204,7 +204,7 @@ export const AlertSettings = ({
 
       {/* Mention drives both features, so it sits under both rather than inside either. */}
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-neutral-800 pt-3 text-sm">
-        <span className="w-36 shrink-0 text-neutral-500">Mention</span>
+        <span className="w-full shrink-0 text-neutral-500 sm:w-36">Mention</span>
         <input
           value={filters.mentions.join(', ')}
           onChange={(event) =>
@@ -214,7 +214,7 @@ export const AlertSettings = ({
             })
           }
           placeholder="@handle, @another"
-          className={`w-64 ${CONTROL} placeholder:text-neutral-700`}
+          className={`w-full ${CONTROL} placeholder:text-neutral-700 sm:w-64`}
         />
         {status?.lastError ? (
           <span className="text-[11px] text-neutral-400">

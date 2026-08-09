@@ -8,8 +8,8 @@ const Page = async () => {
     await getPoolsSnapshot()
 
   return (
-    <main className="mx-auto max-w-[1560px] px-6 py-10">
-      <header className="mb-8">
+    <main className="mx-auto max-w-[1560px] px-4 py-6 sm:px-6 sm:py-10">
+      <header className="mb-6 sm:mb-8">
         <h1 className="text-xl font-semibold tracking-tight text-neutral-100">LP Pool Tracker</h1>
         <p className="mt-2 max-w-3xl text-sm leading-relaxed text-neutral-500">
           Uniswap on Robinhood Chain. {totalPools.toLocaleString()} pools, of which{' '}
