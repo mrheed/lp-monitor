@@ -1,4 +1,9 @@
-import { sendTelegramMessage, telegramConfigured, TelegramError } from '../clients/telegram'
+import {
+  editTelegramMessage,
+  sendTelegramMessage,
+  telegramConfigured,
+  TelegramError,
+} from '../clients/telegram'
 import {
   ALERT_MAX_BACKOFF_MS,
   ALERT_MIN_SEND_INTERVAL_MS,
@@ -81,6 +86,10 @@ type WatcherState = {
   lastReportAt: number | null
   /** What the last report rendered, so an unchanged one is never sent again. */
   reportedSignature: string | null
+  /** The one message each alert keeps, edited rather than replaced. */
+  messageIds: { newPool: number | null; change: number | null }
+  /** Pools announced since the new-pool message was first posted, for its running total. */
+  announcedInMessage: number
 }
 
 const FRESH: () => WatcherState = () => ({
@@ -101,6 +110,8 @@ const FRESH: () => WatcherState = () => ({
   reported: new Map(),
   lastReportAt: null,
   reportedSignature: null,
+  messageIds: { newPool: null, change: null },
+  announcedInMessage: 0,
 })
 
 /**
@@ -132,6 +143,8 @@ const restore = () => {
   for (const [id, metrics] of Object.entries(saved.reported)) state.reported.set(id, metrics)
   state.reportedSignature = saved.reportedSignature
   state.lastReportAt = saved.lastReportAt
+  state.messageIds = saved.messageIds
+  state.announcedInMessage = saved.announcedInMessage
 
   // Sightings are a separate file because they are a cache of what the chain looked like, not a
   // record of anything sent. Losing them costs age precision and nothing else.
@@ -147,6 +160,8 @@ const persist = () => {
     reported: Object.fromEntries(state.reported),
     reportedSignature: state.reportedSignature,
     lastReportAt: state.lastReportAt,
+    messageIds: state.messageIds,
+    announcedInMessage: state.announcedInMessage,
   })
   saveSightings({ firstSeen: Object.fromEntries(state.firstSeen) })
 }
@@ -202,6 +217,31 @@ const record = (entry: AlertRecord) => {
 }
 
 /**
+ * Posts an alert as a single message that is edited in place.
+ *
+ * Each alert keeps one message rather than adding to the chat, so a chain minting pools all day
+ * leaves one entry to read instead of a wall. Telegram refuses to edit anything older than 48
+ * hours, and a message can be deleted from under us, so a failed edit falls back to posting a
+ * fresh one and adopting its id.
+ */
+const upsert = async (kind: 'newPool' | 'change', text: string): Promise<void> => {
+  const existing = state.messageIds[kind]
+
+  if (existing !== null) {
+    try {
+      await editTelegramMessage(existing, text)
+      return
+    } catch {
+      // Too old, or gone. Fall through and start a new one.
+      state.messageIds[kind] = null
+      if (kind === 'newPool') state.announcedInMessage = 0
+    }
+  }
+
+  state.messageIds[kind] = await sendTelegramMessage(text)
+}
+
+/**
  * Announces one batch, and records the pools only if Telegram accepted it.
  *
  * At most one message leaves per poll, and never sooner than the minimum interval. A chain that
@@ -216,7 +256,11 @@ const announce = async () => {
   // queue drains at a readable pace rather than one message claiming hundreds of pools.
   const batch = state.pending.slice(0, NAMED_LIMIT)
   try {
-    await sendTelegramMessage(formatAlert(batch, state.filters.mentions))
+    // The running total keeps the edit honest: without it, replacing the text would quietly
+    // discard the fact that earlier pools were announced at all.
+    const total = state.announcedInMessage + batch.length
+    await upsert('newPool', formatAlert(batch, state.filters.mentions, total))
+    state.announcedInMessage = total
 
     for (const pool of batch) state.announced.add(pool.poolId.toLowerCase())
     state.pending = state.pending.filter((pool) => !state.announced.has(pool.poolId.toLowerCase()))
@@ -414,7 +458,7 @@ const reportChanges = async (candidates: AlertCandidate[]) => {
   if (!hasMaterialChange(rows, filters.minChangePercent / 100)) return
 
   try {
-    await sendTelegramMessage(formatChangeReport(rows, filters.mentions))
+    await upsert('change', formatChangeReport(rows, filters.mentions))
 
     for (const pool of current) state.reported.set(pool.poolId.toLowerCase(), pool.metrics)
     state.reportedSignature = signature

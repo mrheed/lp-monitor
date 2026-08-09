@@ -324,3 +324,24 @@ describe('fee type filter', () => {
     expect(matchesFilters(pool('a', { dynamicFee: false }), on)).toBe(true)
   })
 })
+
+describe('formatAlert as a single edited message', () => {
+  it('says how many were announced before the ones it lists', () => {
+    // The message is edited in place, so without this the earlier pools would vanish silently.
+    const message = formatAlert([pool('a'), pool('b')], [], 30)
+
+    expect(message).toContain('plus 28 announced earlier')
+  })
+
+  it('says nothing extra when it covers everything so far', () => {
+    expect(formatAlert([pool('a'), pool('b')], [], 2)).not.toContain('announced earlier')
+  })
+
+  it('says nothing extra on the first send, before a total exists', () => {
+    expect(formatAlert([pool('a')])).not.toContain('announced earlier')
+  })
+
+  it('never reports a negative earlier count', () => {
+    expect(formatAlert([pool('a'), pool('b'), pool('c')], [], 1)).not.toContain('earlier')
+  })
+})

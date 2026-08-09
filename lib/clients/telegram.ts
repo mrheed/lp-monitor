@@ -3,28 +3,29 @@ export const telegramConfigured = () =>
   Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID)
 
 /**
- * Sends one message to the configured chat.
+ * Sends or edits the single message each alert keeps.
  *
- * The token and chat id are read from the environment and never leave the server; the browser
- * only ever sends the pools it wants announced. Sending is deliberately not retried: a repeated
- * alert is worse than a missed one, since the pool it describes will still be in the table.
+ * The token and chat id are read from the environment and never leave the server. Sending is
+ * deliberately not retried: a repeated alert is worse than a missed one, since the pool it
+ * describes will still be in the table.
  */
-export const sendTelegramMessage = async (text: string): Promise<void> => {
+/** Calls one Telegram method, returning the parsed result or throwing with its own reason. */
+const call = async (method: string, body: Record<string, unknown>) => {
   const token = process.env.TELEGRAM_BOT_TOKEN
   const chatId = process.env.TELEGRAM_CHAT_ID
 
   if (!token || !chatId) throw new Error('Telegram is not configured')
 
-  const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
-      text,
-      // The message is composed as HTML so links can sit behind short labels. Everything drawn
-      // from chain data is escaped by the composer before it gets here.
+      // Composed as HTML so links can sit behind short labels. Everything drawn from chain data
+      // is escaped by the composer before it gets here.
       parse_mode: 'HTML',
       disable_web_page_preview: true,
+      ...body,
     }),
     cache: 'no-store',
   })
@@ -36,7 +37,32 @@ export const sendTelegramMessage = async (text: string): Promise<void> => {
     const body: unknown = await response.json().catch(() => null)
     const detail = describe(body) ?? `HTTP ${response.status}`
 
-    throw new TelegramError(`Telegram send failed: ${response.status} ${detail}`, retryAfter(body))
+    throw new TelegramError(`Telegram ${method} failed: ${response.status} ${detail}`, retryAfter(body))
+  }
+
+  const parsed: unknown = await response.json().catch(() => null)
+  const result = (parsed as { result?: { message_id?: unknown } } | null)?.result
+
+  return typeof result?.message_id === 'number' ? result.message_id : null
+}
+
+/** Sends a new message and returns its id, so it can be edited later. */
+export const sendTelegramMessage = async (text: string): Promise<number | null> =>
+  call('sendMessage', { text })
+
+/**
+ * Replaces the text of an existing message.
+ *
+ * Telegram treats an edit to identical text as an error, which is not a failure worth reporting:
+ * the message already says what it should. It also refuses to edit anything older than 48 hours,
+ * which the caller handles by sending a fresh one.
+ */
+export const editTelegramMessage = async (messageId: number, text: string): Promise<void> => {
+  try {
+    await call('editMessageText', { message_id: messageId, text })
+  } catch (error) {
+    if (error instanceof Error && /not modified/i.test(error.message)) return
+    throw error
   }
 }
 

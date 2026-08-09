@@ -191,7 +191,11 @@ export const normaliseHandle = (raw: string): string | null => {
  * Composed as Telegram HTML so each pool's links fit behind short labels rather than two bare
  * URLs per line. Every value drawn from chain data is escaped on the way in.
  */
-export const formatAlert = (pools: AlertCandidate[], mentions: string[] = []): string => {
+export const formatAlert = (
+  pools: AlertCandidate[],
+  mentions: string[] = [],
+  totalAnnounced = 0,
+): string => {
   const named = pools.slice(0, NAMED_LIMIT)
   const rest = pools.length - named.length
 
@@ -217,10 +221,14 @@ export const formatAlert = (pools: AlertCandidate[], mentions: string[] = []): s
     ].filter((line): line is string => line !== null)
   })
 
+  // This message is edited in place rather than reposted, so it says what it currently lists and,
+  // once it has covered more than that, how many it has announced in total.
+  const earlier = Math.max(0, totalAnnounced - pools.length)
   const heading =
     pools.length === 1
       ? '<b>New pool on Robinhood Chain</b>'
       : `<b>${pools.length} new pools on Robinhood Chain</b>`
+  const running = earlier > 0 ? `<i>plus ${earlier} announced earlier</i>` : null
 
   const handles = mentions
     .map(normaliseHandle)
@@ -231,6 +239,7 @@ export const formatAlert = (pools: AlertCandidate[], mentions: string[] = []): s
     heading,
     ...lines,
     rest > 0 ? `…and ${rest} more` : null,
+    running,
   ]
     .filter(Boolean)
     .join('\n')

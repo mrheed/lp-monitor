@@ -40,6 +40,14 @@ export type AlertState = {
   >
   reportedSignature: string | null
   lastReportAt: number | null
+  /**
+   * The one message each alert keeps.
+   *
+   * Persisted because a restart that forgot them would post a second message and defeat the
+   * whole point of editing one in place.
+   */
+  messageIds: { newPool: number | null; change: number | null }
+  announcedInMessage: number
 }
 
 /**
@@ -72,6 +80,8 @@ const EMPTY: AlertState = {
   reported: {},
   reportedSignature: null,
   lastReportAt: null,
+  messageIds: { newPool: null, change: null },
+  announcedInMessage: 0,
 }
 
 /** Reads a JSON file, yielding null rather than throwing on anything unreadable. */
@@ -124,7 +134,21 @@ export const interpretAlertState = (record: Record<string, unknown> | null): Ale
     reportedSignature:
       typeof record.reportedSignature === 'string' ? record.reportedSignature : null,
     lastReportAt: typeof record.lastReportAt === 'number' ? record.lastReportAt : null,
+    messageIds: {
+      newPool: readId(record.messageIds, 'newPool'),
+      change: readId(record.messageIds, 'change'),
+    },
+    announcedInMessage:
+      typeof record.announcedInMessage === 'number' ? record.announcedInMessage : 0,
   }
+}
+
+/** Reads one stored message id, treating anything unexpected as absent. */
+const readId = (value: unknown, key: 'newPool' | 'change'): number | null => {
+  if (typeof value !== 'object' || value === null) return null
+
+  const id = (value as Record<string, unknown>)[key]
+  return typeof id === 'number' ? id : null
 }
 
 /** Reads persisted alert state, falling back to defaults. */

@@ -101,3 +101,23 @@ describe('interpretAlertState', () => {
     expect(interpretAlertState({ announced: ['0xabc', 42, null] }).announced).toEqual(['0xabc'])
   })
 })
+
+describe('message ids', () => {
+  it('restores the message each alert keeps, so a restart does not post a second one', () => {
+    const state = interpretAlertState({ messageIds: { newPool: 42, change: 43 } })
+
+    expect(state.messageIds.newPool).toBe(42)
+    expect(state.messageIds.change).toBe(43)
+  })
+
+  it('treats a missing or malformed id as none rather than trusting the file', () => {
+    expect(interpretAlertState({}).messageIds.newPool).toBe(null)
+    expect(interpretAlertState({ messageIds: 'nope' }).messageIds.change).toBe(null)
+    expect(interpretAlertState({ messageIds: { newPool: 'x' } }).messageIds.newPool).toBe(null)
+  })
+
+  it('carries the running total the edited message reports', () => {
+    expect(interpretAlertState({ announcedInMessage: 17 }).announcedInMessage).toBe(17)
+    expect(interpretAlertState({}).announcedInMessage).toBe(0)
+  })
+})
