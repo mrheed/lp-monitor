@@ -1,0 +1,516 @@
+import { sendTelegramMessage, telegramConfigured, TelegramError } from '../clients/telegram'
+import {
+  ALERT_MAX_BACKOFF_MS,
+  ALERT_MIN_SEND_INTERVAL_MS,
+  ALERT_POLL_INTERVAL_MS,
+} from '../config'
+import {
+  BASELINE,
+  HISTORY_LIMIT,
+  loadAlertState,
+  loadSightings,
+  saveAlertState,
+  saveSightings,
+  toRecord,
+  type AlertRecord,
+} from './alertStore'
+import {
+  DEFAULT_FILTERS,
+  detectNewPools,
+  NAMED_LIMIT,
+  formatAlert,
+  matchesFilters,
+  type AlertCandidate,
+  type AlertFilters,
+} from './newPools'
+import {
+  buildChangeReport,
+  formatChangeReport,
+  hasMaterialChange,
+  reportSignature,
+  type ChangeRow,
+  type PoolMetrics,
+} from './poolChanges'
+import { getPoolsSnapshot, loadActivityFor } from './pools'
+
+/** What the UI can see about the watcher without being able to drive it. */
+export type AlertStatus = {
+  configured: boolean
+  running: boolean
+  filters: AlertFilters
+  knownPools: number
+  lastPollAt: number | null
+  lastSentAt: number | null
+  lastSentCount: number
+  /** New pools matched but not yet announced, because a send failed or was throttled. */
+  queued: number
+  lastError: string | null
+  /** Recent announcement attempts, newest first, successes and failures alike. */
+  history: AlertRecord[]
+  /** How many pools the change report covers, and when it last went out. */
+  monitored: number
+  lastReportAt: number | null
+}
+
+/**
+ * Pools that have been announced.
+ *
+ * Membership means one thing only: an alert naming this pool was delivered. Pools present when
+ * watching began are not members, so they queue like any other; marking them silently would
+ * record them as told without telling anyone.
+ */
+type WatcherState = {
+  /** Pools an alert has been delivered for. Nothing else ever joins this set. */
+  announced: Set<string>
+  firstSeen: Map<string, number>
+  pending: AlertCandidate[]
+  filters: AlertFilters
+  history: AlertRecord[]
+  timer: ReturnType<typeof setInterval> | null
+  restored: boolean
+  polling: boolean
+  lastPollAt: number | null
+  lastSentAt: number | null
+  lastSentCount: number
+  lastError: string | null
+  /** Earliest time another send may be attempted, covering both success and failure. */
+  nextAttemptAt: number
+  consecutiveFailures: number
+  /** State each monitored pool was in when the last change report went out. */
+  reported: Map<string, PoolMetrics>
+  lastReportAt: number | null
+  /** What the last report rendered, so an unchanged one is never sent again. */
+  reportedSignature: string | null
+}
+
+const FRESH: () => WatcherState = () => ({
+  announced: new Set(),
+  firstSeen: new Map(),
+  pending: [],
+  filters: DEFAULT_FILTERS,
+  history: [],
+  timer: null,
+  restored: false,
+  polling: false,
+  lastPollAt: null,
+  lastSentAt: null,
+  lastSentCount: 0,
+  lastError: null,
+  nextAttemptAt: 0,
+  consecutiveFailures: 0,
+  reported: new Map(),
+  lastReportAt: null,
+  reportedSignature: null,
+})
+
+/**
+ * The watcher's state, held on `globalThis` rather than in module scope.
+ *
+ * A dev server re-evaluates a changed module without discarding the old one, so module-level
+ * state produced a second watcher on every edit: each had its own empty `known` set, its own
+ * interval, and announced the same pool again. Anchoring to the global object means a reload
+ * reuses the running watcher instead of starting a rival to it.
+ */
+const globalKey = Symbol.for('lp-tracker.alertWatcher')
+const globals = globalThis as unknown as Record<symbol, WatcherState | undefined>
+const state: WatcherState = globals[globalKey] ?? (globals[globalKey] = FRESH())
+
+/**
+ * Restores filters, history and the known set from disk, once per process.
+ *
+ * Restoring the known set is what stops a restart from re-seeding and losing the record of what
+ * had already been announced.
+ */
+const restore = () => {
+  if (state.restored) return
+  state.restored = true
+
+  const saved = loadAlertState()
+  state.filters = saved.filters
+  state.history = saved.history
+  for (const id of saved.announced) state.announced.add(id)
+  for (const [id, metrics] of Object.entries(saved.reported)) state.reported.set(id, metrics)
+  state.reportedSignature = saved.reportedSignature
+  state.lastReportAt = saved.lastReportAt
+
+  // Sightings are a separate file because they are a cache of what the chain looked like, not a
+  // record of anything sent. Losing them costs age precision and nothing else.
+  for (const [id, at] of Object.entries(loadSightings().firstSeen)) state.firstSeen.set(id, at)
+}
+
+/** Writes the parts worth surviving a restart. */
+const persist = () => {
+  saveAlertState({
+    filters: state.filters,
+    history: state.history,
+    announced: [...state.announced],
+    reported: Object.fromEntries(state.reported),
+    reportedSignature: state.reportedSignature,
+    lastReportAt: state.lastReportAt,
+  })
+  saveSightings({ firstSeen: Object.fromEntries(state.firstSeen) })
+}
+
+/**
+ * When each pool was first observed appearing.
+ *
+ * Empty for pools that predate the watcher, which is the honest answer: it never saw them
+ * arrive, so it cannot say how old they are.
+ */
+export const getFirstSeen = (): ReadonlyMap<string, number> => {
+  restore()
+  return state.firstSeen
+}
+
+export const getAlertFilters = (): AlertFilters => {
+  restore()
+  return state.filters
+}
+
+/** Replaces the filters the watcher applies to pools it has not yet announced. */
+export const setAlertFilters = (next: AlertFilters) => {
+  restore()
+  state.filters = next
+
+  // A tightened filter should not leave already-queued pools waiting forever, and a loosened one
+  // should not retroactively announce pools seen while it was narrow.
+  state.pending = state.pending.filter((pool) => matchesFilters(pool, next))
+  persist()
+}
+
+export const getAlertStatus = (): AlertStatus => {
+  restore()
+  return {
+    configured: telegramConfigured(),
+    running: state.timer !== null,
+    filters: state.filters,
+    knownPools: state.announced.size,
+    lastPollAt: state.lastPollAt,
+    lastSentAt: state.lastSentAt,
+    lastSentCount: state.lastSentCount,
+    queued: state.pending.length,
+    lastError: state.lastError,
+    history: state.history,
+    monitored: state.reported.size,
+    lastReportAt: state.lastReportAt,
+  }
+}
+
+/** Adds one attempt to the history, newest first, and persists it. */
+const record = (entry: AlertRecord) => {
+  state.history = [entry, ...state.history].slice(0, HISTORY_LIMIT)
+}
+
+/**
+ * Announces one batch, and records the pools only if Telegram accepted it.
+ *
+ * At most one message leaves per poll, and never sooner than the minimum interval. A chain that
+ * mints pools continuously would otherwise produce a burst of messages that Telegram rate limits
+ * and nobody reads; carrying the overflow to the next poll costs a minute of delay instead.
+ */
+const announce = async () => {
+  if (state.pending.length === 0) return
+  if (Date.now() < state.nextAttemptAt) return
+
+  // Only as many as the message can name. The rest stay queued and go out next time, so the
+  // queue drains at a readable pace rather than one message claiming hundreds of pools.
+  const batch = state.pending.slice(0, NAMED_LIMIT)
+  try {
+    await sendTelegramMessage(formatAlert(batch, state.filters.mentions))
+
+    for (const pool of batch) state.announced.add(pool.poolId.toLowerCase())
+    state.pending = state.pending.filter((pool) => !state.announced.has(pool.poolId.toLowerCase()))
+
+    state.lastSentAt = Date.now()
+    state.lastSentCount = batch.length
+    state.lastError = null
+    state.consecutiveFailures = 0
+    state.nextAttemptAt = Date.now() + ALERT_MIN_SEND_INTERVAL_MS
+    record(toRecord(batch, state.filters.mentions, { status: 'sent' }))
+  } catch (error) {
+    // Left in `pending` and out of `known`, so the same pools are tried again later.
+    state.lastError = error instanceof Error ? error.message : 'Unknown error'
+    state.consecutiveFailures += 1
+
+    // The throttle previously counted successes only, so a rejected send was retried on the very
+    // next poll and kept earning the same rejection. A 429 states how long to wait, which is
+    // authoritative; otherwise back off geometrically to a ceiling.
+    const requested =
+      error instanceof TelegramError && error.retryAfterSeconds !== null
+        ? error.retryAfterSeconds * 1_000
+        : 0
+    const backoff = Math.min(
+      ALERT_MIN_SEND_INTERVAL_MS * 2 ** (state.consecutiveFailures - 1),
+      ALERT_MAX_BACKOFF_MS,
+    )
+
+    state.nextAttemptAt = Date.now() + Math.max(requested, backoff)
+    record(toRecord(batch, state.filters.mentions, { status: 'failed', error: state.lastError }))
+  }
+
+  persist()
+}
+
+/**
+ * One watch cycle: read the pools, queue what matches and has not been announced, then announce.
+ *
+ * Nothing is written off silently. Every matching pool is queued and stays queued until a
+ * message naming it is delivered, which is what makes the queue depth an honest number.
+ */
+export const pollOnce = async (): Promise<void> => {
+  restore()
+  if (state.polling) return
+  state.polling = true
+
+  try {
+    const { rows } = await getPoolsSnapshot()
+    state.lastPollAt = Date.now()
+
+    const candidates: AlertCandidate[] = rows.map((row) => ({
+      poolId: row.poolId,
+      pair: row.pair,
+      feeTier: row.feeTier,
+      dynamicFee: row.dynamicFee,
+      hasHook: row.hasHook,
+      tvlUsd: row.tvlUsd,
+      recentFeesPerHourUsd: row.recentFeesPerHourUsd,
+      totalFeesUsd: row.totalFeesUsd,
+      recentFeeWindow: row.recentFeeWindow,
+      // An empty sample means no reading yet, not a pool nobody trades. A brand new pool is
+      // usually not in the transaction feed at all, and 0/h would read as dead on arrival.
+      txPerHour:
+        row.activity && row.activity.sampleSize > 0 ? row.activity.transactionsPerHour : null,
+      volumeUsdPerHour:
+        row.activity && row.activity.sampleSize > 0 ? row.activity.volumeUsdPerHour : null,
+      krystalUrl: row.krystalUrl,
+      uniswapUrl: row.uniswapUrl,
+      openHolders: row.positionHolders
+        .filter((holder) => holder.state === 'open')
+        .map((holder) => holder.label),
+    }))
+
+    // The first poll with no sightings records every pool as baseline: present, age unknown.
+    // Every later poll stamps only ids absent from that map, which are genuinely new arrivals.
+    //
+    // The baseline is decided by the sightings map alone. Deciding it from the announced set as
+    // well meant that losing one file while keeping the other stamped the whole chain with the
+    // moment of that poll, and every pool then read as minutes old.
+    const establishingBaseline = state.firstSeen.size === 0
+    const sightedAt = establishingBaseline ? BASELINE : Date.now()
+
+    for (const pool of candidates) {
+      const id = pool.poolId.toLowerCase()
+      if (!state.firstSeen.has(id)) state.firstSeen.set(id, sightedAt)
+    }
+
+    // A pool that does not match stays out of `known`, so loosening a filter later brings it
+    // back into scope rather than having silently written it off.
+    const { fresh } = detectNewPools(state.announced, candidates, { ...state.filters, enabled: true })
+
+    const queuedIds = new Set(state.pending.map((pool) => pool.poolId.toLowerCase()))
+    const added = fresh.filter((pool) => !queuedIds.has(pool.poolId.toLowerCase()))
+
+    // A pool that has just appeared has not been swept yet, so the trade rate the message wants
+    // would be blank exactly when it fires. Measuring the few fresh ones costs one request each.
+    state.pending = [...state.pending, ...(await withActivity(added, rows))]
+
+    if (state.filters.enabled && telegramConfigured()) await announce()
+    await reportChanges(candidates)
+  } catch (error) {
+    state.lastError = error instanceof Error ? error.message : 'Unknown error'
+  } finally {
+    state.polling = false
+  }
+}
+
+/**
+ * Measures pools that have no reading yet, so an alert can describe what the pool is doing.
+ *
+ * Only the newly matched pools are measured, which is a handful even on a busy chain. A failure
+ * leaves the rate null and the message says so rather than implying the pool is idle.
+ */
+const withActivity = async (
+  pools: AlertCandidate[],
+  rows: Awaited<ReturnType<typeof getPoolsSnapshot>>['rows'],
+): Promise<AlertCandidate[]> => {
+  const unmeasured = pools.filter((pool) => pool.txPerHour === null)
+  if (unmeasured.length === 0) return pools
+
+  const protocolOf = new Map(rows.map((row) => [row.poolId.toLowerCase(), row.protocol]))
+
+  try {
+    const measured = await loadActivityFor(
+      unmeasured.map((pool) => ({
+        poolId: pool.poolId,
+        protocol: protocolOf.get(pool.poolId.toLowerCase()) ?? '',
+      })),
+    )
+
+    return pools.map((pool) => {
+      const activity = measured[pool.poolId.toLowerCase()]
+      return activity === undefined
+        ? pool
+        : { ...pool, txPerHour: activity.transactionsPerHour }
+    })
+  } catch {
+    // Announcing without a rate beats not announcing at all.
+    return pools
+  }
+}
+
+/**
+ * Sends the periodic comparison of every monitored pool against its last reported state.
+ *
+ * Separate from the new-pool alert: one answers "what appeared", the other "what are the pools I
+ * checked doing now". Only the pools on the watchlist are covered, because a report spanning
+ * every pool on the chain is noise and choosing what to watch is a decision, not a query.
+ *
+ * The first run establishes the baseline without sending, since a comparison against nothing is
+ * just a list.
+ */
+const reportChanges = async (candidates: AlertCandidate[]) => {
+  const filters = state.filters
+  if (!filters.reportChanges || !telegramConfigured()) return
+
+  const watched = new Set(filters.monitoredPoolIds.map((id) => id.toLowerCase()))
+  if (watched.size === 0) return
+
+  const monitored = candidates.filter((pool) => watched.has(pool.poolId.toLowerCase()))
+  if (monitored.length === 0) return
+
+  const current = monitored.map((pool) => ({
+    poolId: pool.poolId,
+    pair: pool.pair,
+    metrics: {
+      tvlUsd: pool.tvlUsd,
+      feesPerHourUsd: pool.recentFeesPerHourUsd,
+      txPerHour: pool.txPerHour,
+      volumeUsdPerHour: pool.volumeUsdPerHour,
+    },
+    openHolders: pool.openHolders,
+    krystalUrl: pool.krystalUrl,
+  }))
+
+  // Checked every poll, sent only when the rendered figures differ from what was last sent.
+  // Comparing raw numbers here would fire every minute on a rounding difference nobody can see.
+  const signature = reportSignature(current)
+  if (signature === state.reportedSignature) return
+
+  const establishing = state.reportedSignature === null
+
+  if (establishing) {
+    // Nothing to compare against yet, so this pass only records the starting state.
+    for (const pool of current) state.reported.set(pool.poolId.toLowerCase(), pool.metrics)
+    state.reportedSignature = signature
+    state.lastReportAt = Date.now()
+    persist()
+    return
+  }
+
+  const rows = buildChangeReport(state.reported, current)
+
+  // Nothing here moved enough to be worth a message. The baseline is deliberately left where it
+  // is, so a pool drifting a little each minute still crosses the threshold in time.
+  if (!hasMaterialChange(rows, filters.minChangePercent / 100)) return
+
+  try {
+    await sendTelegramMessage(formatChangeReport(rows, filters.mentions))
+
+    for (const pool of current) state.reported.set(pool.poolId.toLowerCase(), pool.metrics)
+    state.reportedSignature = signature
+    state.lastReportAt = Date.now()
+    state.lastError = null
+    record(toRecord(rows.map((row) => ({ pair: row.pair, poolId: row.poolId })), filters.mentions, { status: 'sent' }, 'change'))
+    persist()
+  } catch (error) {
+    // Baseline and signature are left untouched, so the next poll retries the same comparison
+    // rather than silently accepting the new state as reported.
+    state.lastError = error instanceof Error ? error.message : 'Unknown error'
+    record(
+      toRecord(
+        rows.map((row) => ({ pair: row.pair, poolId: row.poolId })),
+        filters.mentions,
+        { status: 'failed', error: state.lastError },
+        'change',
+      ),
+    )
+    persist()
+  }
+}
+
+/**
+ * Builds the change report as it stands right now, without sending it.
+ *
+ * Reads the same baseline the watcher would compare against, so what this shows is what a
+ * message would say. Nothing is recorded and no baseline advances, which is what makes it safe
+ * to run repeatedly.
+ */
+export const previewChangeReport = async (): Promise<{
+  rows: ChangeRow[]
+  material: boolean
+  minChangePercent: number
+  lastReportAt: number | null
+}> => {
+  restore()
+
+  const watched = new Set(state.filters.monitoredPoolIds.map((id) => id.toLowerCase()))
+  if (watched.size === 0) {
+    return { rows: [], material: false, minChangePercent: state.filters.minChangePercent, lastReportAt: state.lastReportAt }
+  }
+
+  const { rows: poolRows } = await getPoolsSnapshot()
+  const current = poolRows
+    .filter((row) => watched.has(row.poolId.toLowerCase()))
+    .map((row) => ({
+      poolId: row.poolId,
+      pair: row.pair,
+      metrics: {
+        tvlUsd: row.tvlUsd,
+        feesPerHourUsd: row.recentFeesPerHourUsd,
+        txPerHour: row.activity && row.activity.sampleSize > 0 ? row.activity.transactionsPerHour : null,
+        volumeUsdPerHour:
+          row.activity && row.activity.sampleSize > 0 ? row.activity.volumeUsdPerHour : null,
+      },
+      openHolders: row.positionHolders
+        .filter((holder) => holder.state === 'open')
+        .map((holder) => holder.label),
+      krystalUrl: row.krystalUrl,
+    }))
+
+  const rows = buildChangeReport(state.reported, current)
+
+  return {
+    rows,
+    material: hasMaterialChange(rows, state.filters.minChangePercent / 100),
+    minChangePercent: state.filters.minChangePercent,
+    lastReportAt: state.lastReportAt,
+  }
+}
+
+/**
+ * Starts the polling loop, once per process.
+ *
+ * Polling runs whether or not alerts are switched on, so the queue builds while they are off and
+ * drains once they are on. It also keeps the pool snapshot warm, so a browser asking for it
+ * rarely waits on the upstream.
+ */
+export const startAlertWatcher = () => {
+  restore()
+  if (state.timer !== null) return
+
+  const timer = setInterval(() => {
+    void pollOnce()
+  }, ALERT_POLL_INTERVAL_MS)
+
+  // `unref` keeps the interval from holding the process open on its own.
+  if (typeof timer === 'object' && 'unref' in timer) timer.unref()
+  state.timer = timer
+
+  void pollOnce()
+}
+
+/** Stops the loop and forgets everything. Used by tests. */
+export const resetAlertWatcher = () => {
+  if (state.timer !== null) clearInterval(state.timer)
+  Object.assign(state, FRESH())
+}

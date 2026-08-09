@@ -1,0 +1,16 @@
+node_modules
+.next
+*.tsbuildinfo
+next-env.d.ts
+
+# Secrets. .env holds a live bot token and wallet addresses; only the example is tracked.
+.env
+.env.local
+.env*.local
+
+# Installed agent tooling, restored with `npx impeccable install`. Not project code.
+.claude/
+
+# Runtime state, local to one machine.
+.alerts.json
+.pool-sightings.json
