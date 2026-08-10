@@ -8,6 +8,7 @@ import {
   ALERT_MAX_BACKOFF_MS,
   ALERT_MIN_SEND_INTERVAL_MS,
   ALERT_POLL_INTERVAL_MS,
+  TX_SAMPLE_SIZE_WATCHED,
 } from '../config'
 import {
   BASELINE,
@@ -382,8 +383,13 @@ export const pollOnce = async (): Promise<void> => {
 const withActivity = async (
   pools: AlertCandidate[],
   rows: Awaited<ReturnType<typeof getPoolsSnapshot>>['rows'],
+  { remeasure = false } = {},
 ): Promise<AlertCandidate[]> => {
-  const unmeasured = pools.filter((pool) => pool.txCount === null)
+  // Announcements only need a reading where none exists. A report needs every pool measured the
+  // same way: the snapshot pre-measures its top ranked pools with the smaller sweep sample, so
+  // leaving those alone put one pool's three minute window beside another's hour in the same
+  // table, and the two counts underneath were not comparable.
+  const unmeasured = remeasure ? pools : pools.filter((pool) => pool.txCount === null)
   if (unmeasured.length === 0) return pools
 
   const protocolOf = new Map(rows.map((row) => [row.poolId.toLowerCase(), row.protocol]))
@@ -394,6 +400,7 @@ const withActivity = async (
         poolId: pool.poolId,
         protocol: protocolOf.get(pool.poolId.toLowerCase()) ?? '',
       })),
+      TX_SAMPLE_SIZE_WATCHED,
     )
 
     return pools.map((pool) => {
@@ -440,7 +447,7 @@ const reportChanges = async (
   // ranked pools. A watched pool below that cut arrived with no trade figures at all, so six of
   // seven monitored pools reported a dash where their trades should have been. Watching a pool
   // is the reason to measure it, whatever it ranks.
-  const monitored = await withActivity(unmeasured, poolRows)
+  const monitored = await withActivity(unmeasured, poolRows, { remeasure: true })
 
   const current = monitored.map((pool) => ({
     poolId: pool.poolId,
@@ -533,10 +540,11 @@ export const previewChangeReport = async (): Promise<{
   // preview would not match the message it is meant to predict.
   const measured = await loadActivityFor(
     watchedRows.map(({ poolId, protocol }) => ({ poolId, protocol })),
+    TX_SAMPLE_SIZE_WATCHED,
   ).catch(() => ({}) as Record<string, Activity>)
 
   const current = watchedRows.map((row) => {
-    const activity = row.activity ?? measured[row.poolId.toLowerCase()] ?? null
+    const activity = measured[row.poolId.toLowerCase()] ?? row.activity ?? null
     const seen = activity !== null && activity.sampleSize > 0
 
     return {

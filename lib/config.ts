@@ -86,6 +86,21 @@ export const uniswapPoolUrl = (poolAddress: string) =>
 export const TX_SAMPLE_SIZE = 25
 
 /**
+ * Transactions sampled for a pool the operator is watching.
+ *
+ * The maximum the endpoint serves: 150 and above is rejected with "page_size exceeds maximum of
+ * 100". Worth paying here because the watched set is a handful of pools rather than thousands,
+ * and the larger page buys two things the smaller one cannot.
+ *
+ * Span, first: measured across four watched pools it stretched the observed window by 2.7 to 5.5
+ * times, from one minute to four on the busiest and from 23 minutes to an hour on the quietest.
+ *
+ * Trader counts, second: they cannot exceed the sample size, so at 25 they were not counts at
+ * all but a ceiling. The same pools reported 11 to 18 traders at 25 and 27 to 47 at 100.
+ */
+export const TX_SAMPLE_SIZE_WATCHED = 100
+
+/**
  * Simultaneous outbound requests during the frequency fan out.
  *
  * Measured at 25 transactions per page: 12 concurrent gives 5.2 requests per second, 24 gives

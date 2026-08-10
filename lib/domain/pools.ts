@@ -6,6 +6,7 @@ import {
   ACTIVITY_MAX_AGE_MS,
   ACTIVITY_POOL_LIMIT,
   CACHE_TTL_MS,
+  TX_SAMPLE_SIZE,
   krystalPoolUrl,
   trackedWallets,
   uniswapPoolUrl,
@@ -128,13 +129,16 @@ const toRow = (
  * rather than every pool being measured before the page can render. Results are cached per
  * batch, so scrolling back over rows costs nothing.
  */
-export const loadActivityFor = async (targets: { poolId: string; protocol: string }[]) => {
+export const loadActivityFor = async (
+  targets: { poolId: string; protocol: string }[],
+  sampleSize: number = TX_SAMPLE_SIZE,
+) => {
   const answers = new Map<string, Activity>()
   const missing: typeof targets = []
   const stale: typeof targets = []
 
   for (const target of targets) {
-    const hit = peekWithAge<Activity>(activityKey(target.poolId))
+    const hit = peekWithAge<Activity>(activityKey(target.poolId, sampleSize))
 
     if (hit === undefined) {
       missing.push(target)
@@ -148,12 +152,12 @@ export const loadActivityFor = async (targets: { poolId: string; protocol: strin
   // Anything already measured answers from cache, however old, so a request never waits on the
   // network for a pool that has a usable number. Aged entries are refreshed behind the response
   // instead, which is why the table fills instantly and then sharpens.
-  if (stale.length > 0) void refreshInBackground(stale)
+  if (stale.length > 0) void refreshInBackground(stale, sampleSize)
 
   if (missing.length > 0) {
-    const fetched = await fetchActivity(missing)
+    const fetched = await fetchActivity(missing, sampleSize)
     for (const [poolId, activity] of fetched) {
-      remember(activityKey(poolId), activity, ACTIVITY_CACHE_TTL_MS)
+      remember(activityKey(poolId, sampleSize), activity, ACTIVITY_CACHE_TTL_MS)
       answers.set(poolId, activity)
     }
   }
@@ -161,23 +165,33 @@ export const loadActivityFor = async (targets: { poolId: string; protocol: strin
   return Object.fromEntries(answers)
 }
 
-/** Cache key for one pool's activity. Per pool, so a batch is never the unit of reuse. */
-const activityKey = (poolId: string) => `activity:${poolId.toLowerCase()}`
+/**
+ * Cache key for one pool's activity. Per pool, so a batch is never the unit of reuse.
+ *
+ * The sample size is part of the key because it changes the answer: a hundred transactions cover
+ * a longer span and reveal more distinct traders than twenty five of the same pool, so serving
+ * one where the other was asked for would quietly hand back the shorter measurement.
+ */
+const activityKey = (poolId: string, sampleSize: number) =>
+  `activity:${sampleSize}:${poolId.toLowerCase()}`
 
 /** Pools currently being refreshed behind a response, so a slow refresh is not started twice. */
 const refreshing = new Set<string>()
 
 /** Re-measures aged pools without holding up the request that noticed they were aged. */
-const refreshInBackground = async (targets: { poolId: string; protocol: string }[]) => {
+const refreshInBackground = async (
+  targets: { poolId: string; protocol: string }[],
+  sampleSize: number,
+) => {
   const due = targets.filter((target) => !refreshing.has(target.poolId.toLowerCase()))
   if (due.length === 0) return
 
   due.forEach((target) => refreshing.add(target.poolId.toLowerCase()))
 
   try {
-    const fetched = await fetchActivity(due)
+    const fetched = await fetchActivity(due, sampleSize)
     for (const [poolId, activity] of fetched) {
-      remember(activityKey(poolId), activity, ACTIVITY_CACHE_TTL_MS)
+      remember(activityKey(poolId, sampleSize), activity, ACTIVITY_CACHE_TTL_MS)
     }
   } catch {
     // The stale value stays served; the next request past the age threshold tries again.

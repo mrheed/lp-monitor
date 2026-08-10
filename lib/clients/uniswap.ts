@@ -40,10 +40,10 @@ export const protocolVersionFor = (protocol: string) =>
  * and answers with the chain wide firehose, so a response that looks correct can describe
  * twenty other pools. Filtering on the way out makes that failure mode impossible to inherit.
  */
-const fetchPoolTransactions = async ({
-  poolId,
-  protocol,
-}: ActivityTarget): Promise<ActivitySample[]> => {
+const fetchPoolTransactions = async (
+  { poolId, protocol }: ActivityTarget,
+  sampleSize: number,
+): Promise<ActivitySample[]> => {
   const response = await fetch(ENDPOINT, {
     method: 'POST',
     headers: {
@@ -57,7 +57,7 @@ const fetchPoolTransactions = async ({
     body: JSON.stringify({
       chainIds: [CHAIN_ID],
       filter: { protocolVersions: [protocolVersionFor(protocol)], poolId },
-      page: { pageSize: TX_SAMPLE_SIZE },
+      page: { pageSize: sampleSize },
     }),
     cache: 'no-store',
   })
@@ -95,14 +95,21 @@ const mapWithConcurrency = async <TIn, TOut>(
  *
  * A pool whose request fails is omitted from the map rather than failing the batch, so the
  * table renders with a blank frequency cell instead of no table at all.
+ *
+ * `sampleSize` trades payload against the span a measurement covers. The default suits the full
+ * sweep, where 2,600 pools make throughput the constraint; a caller measuring a handful of pools
+ * should ask for more.
  */
-export const fetchActivity = async (targets: ActivityTarget[]): Promise<Map<string, Activity>> => {
+export const fetchActivity = async (
+  targets: ActivityTarget[],
+  sampleSize: number = TX_SAMPLE_SIZE,
+): Promise<Map<string, Activity>> => {
   const entries = await mapWithConcurrency(targets, FETCH_CONCURRENCY, async (target) => {
     // One retry, because the gateway returns intermittent 5xx under a sustained sweep and a
     // single failure previously stranded that pool for the rest of the pass.
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        const activity = computeActivity(await fetchPoolTransactions(target))
+        const activity = computeActivity(await fetchPoolTransactions(target, sampleSize))
         return [target.poolId.toLowerCase(), activity] as const
       } catch {
         if (attempt === 1) return null
