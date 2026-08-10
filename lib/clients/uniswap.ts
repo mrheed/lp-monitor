@@ -9,6 +9,8 @@ const ENDPOINT =
 const transactionSchema = z.object({
   poolId: z.string().default(''),
   timestampMs: z.string(),
+  // Distinguishes a swap from a liquidity add or remove; the feed mixes all three.
+  eventType: z.string().optional(),
   walletAddress: z.string().optional(),
   amountUsd: z.number().optional(),
 })

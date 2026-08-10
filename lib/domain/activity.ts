@@ -3,9 +3,24 @@ import type { Activity } from '../types'
 /** One transaction from the Uniswap data API, narrowed to the fields activity needs. */
 export type ActivitySample = {
   timestampMs: string
+  /** Swap, add or remove. Absent on feeds that do not report it, which are treated as swaps. */
+  eventType?: string
   walletAddress?: string
   amountUsd?: number
 }
+
+/**
+ * Narrows a sample to the swaps.
+ *
+ * The transaction feed mixes liquidity adds and removes in with the trades. Those move USD
+ * through the pool but are deposits rather than trading, so counting them overstates how much a
+ * pool trades; one large deposit is enough to make a quiet pool look busy.
+ *
+ * A row with no event type is kept: the field is only absent on feeds that do not report it,
+ * and dropping every row would zero the measurement rather than degrade it.
+ */
+const swapsOnly = (transactions: ActivitySample[]) =>
+  transactions.filter((entry) => entry.eventType === undefined || entry.eventType.endsWith('_SWAP'))
 
 const EMPTY: Activity = {
   transactionsPerHour: 0,
@@ -51,21 +66,22 @@ const meanTradeUsd = (transactions: ActivitySample[]) => {
  * spans no time yields a rate of 0 rather than dividing by zero.
  */
 export const computeActivity = (transactions: ActivitySample[]): Activity => {
-  if (transactions.length === 0) return EMPTY
+  const swaps = swapsOnly(transactions)
+  if (swaps.length === 0) return EMPTY
 
-  const windowSeconds = spanSeconds(transactions)
-  const wallets = transactions
+  const windowSeconds = spanSeconds(swaps)
+  const wallets = swaps
     .map((entry) => entry.walletAddress?.toLowerCase())
     .filter((wallet): wallet is string => Boolean(wallet))
 
   const perHour = (amount: number) => (windowSeconds > 0 ? amount / (windowSeconds / 3600) : 0)
 
   return {
-    transactionsPerHour: perHour(transactions.length),
-    volumeUsdPerHour: perHour(totalTradeUsd(transactions)),
+    transactionsPerHour: perHour(swaps.length),
+    volumeUsdPerHour: perHour(totalTradeUsd(swaps)),
     uniqueTraders: new Set(wallets).size,
-    averageTradeUsd: meanTradeUsd(transactions),
-    sampleSize: transactions.length,
+    averageTradeUsd: meanTradeUsd(swaps),
+    sampleSize: swaps.length,
     windowSeconds,
   }
 }
