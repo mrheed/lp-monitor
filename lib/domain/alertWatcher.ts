@@ -37,6 +37,7 @@ import {
   type PoolMetrics,
 } from './poolChanges'
 import { getPoolsSnapshot, loadActivityFor } from './pools'
+import type { Activity } from '../types'
 
 /** What the UI can see about the watcher without being able to drive it. */
 export type AlertStatus = {
@@ -363,7 +364,7 @@ export const pollOnce = async (): Promise<void> => {
     state.pending = [...state.pending, ...(await withActivity(added, rows))]
 
     if (state.filters.enabled && telegramConfigured()) await announce()
-    await reportChanges(candidates)
+    await reportChanges(candidates, rows)
   } catch (error) {
     state.lastError = error instanceof Error ? error.message : 'Unknown error'
     log(`poll failed: ${state.lastError}`)
@@ -422,15 +423,24 @@ const withActivity = async (
  * The first run establishes the baseline without sending, since a comparison against nothing is
  * just a list.
  */
-const reportChanges = async (candidates: AlertCandidate[]) => {
+const reportChanges = async (
+  candidates: AlertCandidate[],
+  poolRows: Awaited<ReturnType<typeof getPoolsSnapshot>>['rows'],
+) => {
   const filters = state.filters
   if (!filters.reportChanges || !telegramConfigured()) return
 
   const watched = new Set(filters.monitoredPoolIds.map((id) => id.toLowerCase()))
   if (watched.size === 0) return
 
-  const monitored = candidates.filter((pool) => watched.has(pool.poolId.toLowerCase()))
-  if (monitored.length === 0) return
+  const unmeasured = candidates.filter((pool) => watched.has(pool.poolId.toLowerCase()))
+  if (unmeasured.length === 0) return
+
+  // Measured here rather than taken from the snapshot, which only pre-measures its highest
+  // ranked pools. A watched pool below that cut arrived with no trade figures at all, so six of
+  // seven monitored pools reported a dash where their trades should have been. Watching a pool
+  // is the reason to measure it, whatever it ranks.
+  const monitored = await withActivity(unmeasured, poolRows)
 
   const current = monitored.map((pool) => ({
     poolId: pool.poolId,
@@ -516,24 +526,35 @@ export const previewChangeReport = async (): Promise<{
   }
 
   const { rows: poolRows } = await getPoolsSnapshot()
-  const current = poolRows
-    .filter((row) => watched.has(row.poolId.toLowerCase()))
-    .map((row) => ({
+  const watchedRows = poolRows.filter((row) => watched.has(row.poolId.toLowerCase()))
+
+  // Measured for the same reason the live report measures: the snapshot only pre-measures its
+  // highest ranked pools, so a watched pool below that cut would preview as unmeasured and the
+  // preview would not match the message it is meant to predict.
+  const measured = await loadActivityFor(
+    watchedRows.map(({ poolId, protocol }) => ({ poolId, protocol })),
+  ).catch(() => ({}) as Record<string, Activity>)
+
+  const current = watchedRows.map((row) => {
+    const activity = row.activity ?? measured[row.poolId.toLowerCase()] ?? null
+    const seen = activity !== null && activity.sampleSize > 0
+
+    return {
       poolId: row.poolId,
       pair: row.pair,
       metrics: {
         tvlUsd: row.tvlUsd,
         feesPerHourUsd: row.recentFeesPerHourUsd,
-        txCount: row.activity && row.activity.sampleSize > 0 ? row.activity.sampleSize : null,
-        volumeUsd: row.activity && row.activity.sampleSize > 0 ? row.activity.volumeUsd : null,
-        windowSeconds:
-          row.activity && row.activity.sampleSize > 0 ? row.activity.windowSeconds : null,
+        txCount: seen ? activity.sampleSize : null,
+        volumeUsd: seen ? activity.volumeUsd : null,
+        windowSeconds: seen ? activity.windowSeconds : null,
       },
       openHolders: row.positionHolders
         .filter((holder) => holder.state === 'open')
         .map((holder) => holder.label),
       krystalUrl: row.krystalUrl,
-    }))
+    }
+  })
 
   const rows = buildChangeReport(state.reported, current)
 
