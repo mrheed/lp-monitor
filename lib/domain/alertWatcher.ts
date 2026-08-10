@@ -8,8 +8,6 @@ import {
   ALERT_MAX_BACKOFF_MS,
   ALERT_MIN_SEND_INTERVAL_MS,
   ALERT_POLL_INTERVAL_MS,
-  ceilingSecondsFor,
-  DEFAULT_FEE_WINDOW,
 } from '../config'
 import {
   BASELINE,
@@ -395,9 +393,6 @@ const withActivity = async (
         poolId: pool.poolId,
         protocol: protocolOf.get(pool.poolId.toLowerCase()) ?? '',
       })),
-      // Alerts always compare like with like, so the window is fixed rather than following
-      // whatever the browser last selected.
-      ceilingSecondsFor(DEFAULT_FEE_WINDOW),
     )
 
     return pools.map((pool) => {

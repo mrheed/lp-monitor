@@ -5,9 +5,6 @@ import {
   ACTIVITY_BATCH_SIZE,
   ACTIVITY_PARALLEL_BATCHES,
   COUNTDOWN_TICK_MS,
-  DEFAULT_FEE_WINDOW,
-  FEE_WINDOW_CEILINGS,
-  type FeeWindowId,
   REFRESH_INTERVAL_MS,
   ROW_PAGE_SIZE,
   ACTIVITY_MAX_AGE_MS,
@@ -21,7 +18,6 @@ import type { AlertStatus } from '@/lib/domain/alertWatcher'
 import { DEFAULT_FILTERS, type AlertFilters } from '@/lib/domain/newPools'
 import { rankByScore, scorePools } from '@/lib/domain/score'
 import { simulateFeeShare } from '@/lib/domain/simulate'
-import { effectiveFeesPerHourUsd, formatWindow, withActivity } from '@/lib/domain/liveFees'
 import type { Activity, PoolRow, PositionState } from '@/lib/types'
 
 type SortKey =
@@ -137,31 +133,6 @@ const TABLE_COLUMNS = 18
 const volatilityTone = (percent: number) =>
   percent >= 60 ? 'text-risk' : percent >= 25 ? 'text-caution' : 'text-ink-muted'
 
-/**
- * The fee figure a row should show, with the window it was actually measured over.
- *
- * A measured pool reports its own span, which is usually seconds to minutes; an unmeasured one
- * falls back to the feed's shortest published window. The label is never assumed, so a 40 second
- * reading is never displayed as though it covered fifteen minutes.
- */
-const feeDisplay = (row: PoolRow) => {
-  const { liveFeesPerHourUsd, liveFeeWindowSeconds } = row
-
-  if (liveFeesPerHourUsd !== null && liveFeeWindowSeconds !== null) {
-    return {
-      perHourUsd: liveFeesPerHourUsd,
-      window: formatWindow(liveFeeWindowSeconds),
-      measured: true,
-    }
-  }
-
-  return {
-    perHourUsd: row.recentFeesPerHourUsd,
-    window: row.recentFeeWindow,
-    measured: false,
-  }
-}
-
 /** Reads the value a sort key refers to, unwrapping activity and inverting the ascending keys. */
 const sortValue = (row: PoolRow, key: SortKey, depositUsd: number) => {
   switch (key) {
@@ -171,12 +142,10 @@ const sortValue = (row: PoolRow, key: SortKey, depositUsd: number) => {
       // Negated so the shared descending sort puts the calmest pool first.
       return -row.priceVolatility
     case 'myApr':
-      return simulateFeeShare(depositUsd, row.tvlUsd, effectiveFeesPerHourUsd(row)).aprPercent
+      return simulateFeeShare(depositUsd, row.tvlUsd, row.recentFeesPerHourUsd).aprPercent
     case 'tvlAsc':
       // Negated so the shared descending sort puts the thinnest pool first.
       return -row.tvlUsd
-    case 'recentFeesPerHourUsd':
-      return effectiveFeesPerHourUsd(row)
     case 'rate':
       return row.activity?.transactionsPerHour ?? -1
     case 'volumeRate':
@@ -426,8 +395,7 @@ const PoolCard = ({
   onToggleWatch: (poolId: string) => void
   showWalletNames: boolean
 }) => {
-  const fee = feeDisplay(row)
-  const sim = simulateFeeShare(depositUsd, row.tvlUsd, fee.perHourUsd)
+  const sim = simulateFeeShare(depositUsd, row.tvlUsd, row.recentFeesPerHourUsd)
 
   return (
     <li className={`rounded border border-line px-3.5 py-3 ${CARD_TONE[row.position]}`}>
@@ -467,9 +435,7 @@ const PoolCard = ({
       </div>
 
       <div className="mt-3 grid grid-cols-3 gap-x-3 gap-y-2.5 text-sm">
-        <CardStat label={`Fee rate · ${fee.window}`} tone="text-gain">
-          {fee.window === 'none' ? missing : `${usd(fee.perHourUsd)}/h`}
-        </CardStat>
+        <CardStat label="Fee rate" tone="text-gain">{`${usd(row.recentFeesPerHourUsd)}/h`}</CardStat>
         <CardStat label="Pool TVL">{usd(row.tvlUsd)}</CardStat>
         <CardStat label="My APR" tone="text-gain">
           {sim.aprPercent >= 1000
@@ -515,7 +481,6 @@ const PoolCard = ({
 export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
   const [serverRows, setServerRows] = useState(initialRows)
   const [lazyActivity, setLazyActivity] = useState<Record<string, Activity>>({})
-  const [feeWindow, setFeeWindow] = useState<FeeWindowId>(DEFAULT_FEE_WINDOW)
   const [visibleCount, setVisibleCount] = useState(ROW_PAGE_SIZE)
   const [depositUsd, setDepositUsd] = useState(1_000)
   const [refreshing, setRefreshing] = useState(false)
@@ -546,22 +511,6 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
   const refreshAbort = useRef<AbortController | null>(null)
   const attempts = useRef(new Map<string, number>())
   const measuredAt = useRef(new Map<string, number>())
-
-  /**
-   * Discards every measurement when the window changes.
-   *
-   * A sample clipped to fifteen minutes and the same sample clipped to an hour are different
-   * numbers, so keeping the old ones would leave the table showing a window the reader is no
-   * longer asking for, and the sweep would consider those pools already done. Clearing the
-   * bookkeeping alongside the values is what makes the sweep measure them again.
-   */
-  useEffect(() => {
-    setLazyActivity({})
-    requested.current.clear()
-    attempts.current.clear()
-    measuredAt.current.clear()
-    setUnmeasurable(0)
-  }, [feeWindow])
 
   /**
    * Reloads pool data and restarts the countdown.
@@ -687,26 +636,16 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
   // Server measured rows and lazily measured rows are merged, then rescored together so every
   // score on screen is drawn from the same cohort.
   const rows = useMemo(() => {
-    // The server pre-measures its rows against the default window, so those samples only apply
-    // while that is the window on screen. Selecting another one drops them and lets the sweep
-    // re-measure, rather than showing a 15 minute reading under a 1 hour heading.
-    const serverSamplesApply = feeWindow === DEFAULT_FEE_WINDOW
-
-    // `withActivity` rather than assigning the sample directly, so the live fee figures are
-    // derived from whichever measurement wins here and can never describe an older one. The
-    // lazy sample wins where both exist, being the more recent of the two.
-    const merged = serverRows.map((row) =>
-      withActivity(
-        row,
-        lazyActivity[row.poolId.toLowerCase()] ?? (serverSamplesApply ? row.activity : null),
-      ),
-    )
+    const merged = serverRows.map((row) => ({
+      ...row,
+      activity: row.activity ?? lazyActivity[row.poolId.toLowerCase()] ?? null,
+    }))
 
     // The server pre-measures the first rows, and those arrive without a local timestamp. Left
     // unstamped they read as never measured, so the sweep skipped them for good.
     const stampedAt = Date.now()
     for (const row of serverRows) {
-      if (row.activity === null || !serverSamplesApply) continue
+      if (row.activity === null) continue
       const key = row.poolId.toLowerCase()
       if (!measuredAt.current.has(key)) measuredAt.current.set(key, stampedAt)
     }
@@ -716,7 +655,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
     const scored = rankByScore(scorePools(measured))
 
     return [...scored, ...unmeasured]
-  }, [serverRows, lazyActivity, feeWindow])
+  }, [serverRows, lazyActivity])
 
   // The sweep reads rows through a ref so it is not restarted by its own results arriving.
   rowsRef.current = rows
@@ -781,10 +720,6 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
     if (exhausted > 0) setUnmeasurable((current) => current + exhausted)
   }, [])
 
-  /** The window the sweep is currently measuring against, read without restarting the sweep. */
-  const feeWindowRef = useRef(feeWindow)
-  feeWindowRef.current = feeWindow
-
   /** Requests activity for one batch of pools. */
   const fetchBatch = useCallback(async (batch: PoolRow[]) => {
     const targets = batch.map(({ poolId, protocol: poolProtocol }) => ({
@@ -796,7 +731,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
       const response = await fetch('/api/activity', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ targets, window: feeWindowRef.current }),
+        body: JSON.stringify({ targets }),
       })
       if (!response.ok) throw new Error(String(response.status))
 
@@ -959,34 +894,6 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
             </option>
           ))}
         </select>
-        {/*
-          Segmented rather than a fourth dropdown: three fixed options the reader switches
-          between while comparing, where seeing the alternatives is the point. A dropdown would
-          hide two thirds of the scale behind a click.
-        */}
-        <div
-          role="group"
-          aria-label="Measurement window"
-          title="How far back each measurement may reach. A busy pool is measured over its own sample, which is usually far shorter."
-          className="flex items-center overflow-hidden rounded border border-line bg-surface"
-        >
-          <span className={`${SUB} px-2.5 py-2 sm:py-1.5`}>Window</span>
-          {FEE_WINDOW_CEILINGS.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              aria-pressed={feeWindow === option.id}
-              onClick={() => setFeeWindow(option.id)}
-              className={`border-l border-line px-3 py-2 tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent sm:py-1.5 ${
-                feeWindow === option.id
-                  ? 'bg-accent-dim/25 text-ink'
-                  : 'text-ink-muted hover:bg-surface-raised hover:text-ink'
-              }`}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
         <label className="flex cursor-pointer select-none items-center gap-2 pl-1 text-ink-muted hover:text-ink-muted">
           <input
             type="checkbox"
@@ -1152,8 +1059,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
               </tr>
             ) : null}
             {onScreen.map((row, index) => {
-              const fee = feeDisplay(row)
-              const sim = simulateFeeShare(depositUsd, row.tvlUsd, fee.perHourUsd)
+              const sim = simulateFeeShare(depositUsd, row.tvlUsd, row.recentFeesPerHourUsd)
 
               return (
                 <tr
@@ -1194,16 +1100,12 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
                   </td>
 
                   <td className={`${CELL_EDGE} text-right tabular-nums text-gain`}>
-                    <span
-                      title={
-                        fee.measured
-                          ? `Measured from this pool's own trades over the last ${fee.window}`
-                          : `Reported by the pool feed over its ${fee.window} window`
-                      }
-                    >
-                      {fee.window === 'none' ? missing : `${usd(fee.perHourUsd)}/h`}
+                    <span title={`Measured over the ${row.recentFeeWindow} window`}>
+                      {row.recentFeeWindow === 'none'
+                        ? missing
+                        : `${usd(row.recentFeesPerHourUsd)}/h`}
                     </span>
-                    <div className={SUB}>{fee.window}</div>
+                    <div className={SUB}>{row.recentFeeWindow}</div>
                   </td>
                   <td className={`${AT_XL} ${CELL} text-right tabular-nums text-ink0`}>
                     {usd(row.totalFeesUsd)}
