@@ -30,6 +30,19 @@ export type ChangeInput = {
 export const REPORT_LIMIT = 15
 
 /**
+ * Marks a figure that is extrapolated from a sample rather than reported by the pool feed.
+ *
+ * TVL and fees come from the feed as published totals. Trade rate and volume rate are computed
+ * here from about 25 transactions, whose span is often under two minutes, then scaled to an
+ * hour. The two kinds sit in adjacent rows, and without a mark a reader has no way to tell that
+ * one pair carries far more uncertainty than the other.
+ */
+export const SAMPLED_MARK = '~'
+
+/** Spelled out once per message, rather than repeated against every marked figure. */
+export const SAMPLED_NOTE = `${SAMPLED_MARK} sampled from recent trades, not reported`
+
+/**
  * Pairs each monitored pool with the state it was last reported in.
  *
  * Every monitored pool appears, not only those that moved: the report answers "what are my pools
@@ -157,7 +170,7 @@ export const changeTableLines = (
 
   // Several watched pools can share a pair, since ETH/USDG alone spans sixteen on this chain, so
   // the id fragment is what actually tells two rows apart.
-  const header = `${pad('POOL', 22)}${pad('TVL', 15)}${pad('FEES/H', 15)}${pad('TX/H', 13)}${pad('VOL/H', 15)}HELD BY`
+  const header = `${pad('POOL', 22)}${pad('TVL', 15)}${pad('FEES/H', 15)}${pad(`TX/H${SAMPLED_MARK}`, 13)}${pad(`VOL/H${SAMPLED_MARK}`, 15)}HELD BY`
   const lines = listed.map((row) => {
     const fees = shift(
       row.before ? usdCell(row.before.feesPerHourUsd) : null,
@@ -206,8 +219,10 @@ export const changeBlockLines = (rows: ChangeRow[], decorate: Decorate = (text) 
       `${row.pair} ${row.poolId.slice(2, 8)}`,
       `  tvl   ${cell(row.before?.tvlUsd, row.after.tvlUsd, usdCell)}`,
       `  fees  ${cell(row.before?.feesPerHourUsd, row.after.feesPerHourUsd, usdCell)}`,
-      `  tx    ${cell(row.before?.txPerHour, row.after.txPerHour, countCell)}`,
-      `  vol   ${cell(row.before?.volumeUsdPerHour, row.after.volumeUsdPerHour, usdCell)}`,
+      // The mark is absorbed into the existing label padding rather than added after it, so
+      // every value still begins at the same column.
+      `  tx${SAMPLED_MARK}   ${cell(row.before?.txPerHour, row.after.txPerHour, countCell)}`,
+      `  vol${SAMPLED_MARK}  ${cell(row.before?.volumeUsdPerHour, row.after.volumeUsdPerHour, usdCell)}`,
     ]
 
     return row.openHolders.length > 0 ? [...lines, `  held  ${row.openHolders.join(', ')}`] : lines
@@ -240,6 +255,7 @@ export const formatChangeReport = (rows: ChangeRow[], mentions: string[] = []): 
     `<pre>${escapeHtml(changeBlockLines(rows).join('\n'))}</pre>`,
     links || null,
     rest > 0 ? `…and ${rest} more not shown` : null,
+    `<i>${escapeHtml(SAMPLED_NOTE)}</i>`,
   ]
     .filter((line): line is string => line !== null)
     .join('\n')

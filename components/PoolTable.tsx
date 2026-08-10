@@ -36,9 +36,9 @@ const SORT_LABELS: Record<SortKey, string> = {
   recentFeesPerHourUsd: 'Recent fee rate',
   totalFeesUsd: 'Fees accumulated',
   tvlAsc: 'TVL, thinnest first',
-  rate: 'Tx rate',
-  volumeRate: 'Volume rate',
-  traders: 'Traders',
+  rate: 'Tx rate ~',
+  volumeRate: 'Volume rate ~',
+  traders: 'Traders ~',
   priceVolatility: 'Volatility, calmest first',
   myApr: 'My projected APR',
 }
@@ -132,6 +132,27 @@ const TABLE_COLUMNS = 18
  */
 const volatilityTone = (percent: number) =>
   percent >= 60 ? 'text-risk' : percent >= 25 ? 'text-caution' : 'text-ink-muted'
+
+/**
+ * Why the trade columns carry a mark.
+ *
+ * TVL and fees are published totals from the pool feed. Trade rate, volume rate and trader count
+ * are computed here from a sample of about 25 transactions, whose span is often under two
+ * minutes, then scaled to an hour. They sit beside the reported figures, so without a mark they
+ * read as though they carried the same authority.
+ */
+const SAMPLED_TITLE =
+  'Extrapolated from the last ~25 trades, not reported by the pool feed. A short sample makes this figure jumpy.'
+
+const SampledHeader = ({ children }: { children: ReactNode }) => (
+  <span title={SAMPLED_TITLE}>
+    {children}
+    <span className="text-ink-ghost" aria-hidden>
+      ~
+    </span>
+    <span className="sr-only"> (sampled, not reported)</span>
+  </span>
+)
 
 /** Reads the value a sort key refers to, unwrapping activity and inverting the ascending keys. */
 const sortValue = (row: PoolRow, key: SortKey, depositUsd: number) => {
@@ -442,7 +463,7 @@ const PoolCard = ({
             ? `${(sim.aprPercent / 1000).toFixed(1)}k%`
             : `${sim.aprPercent.toFixed(0)}%`}
         </CardStat>
-        <CardStat label="Tx rate">
+        <CardStat label="Tx rate ~">
           {row.activity ? rate(row.activity.transactionsPerHour) : missing}
         </CardStat>
         <CardStat label="Volatility" tone={volatilityTone(row.priceVolatility)}>
@@ -1033,9 +1054,9 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
               <th className={`${AT_2XL} px-2.5 pb-2.5 text-right font-medium`}>My share</th>
               <th className={`${AT_2XL} px-2.5 pb-2.5 text-right font-medium`}>My fees</th>
               <th className="px-2.5 pb-2.5 text-right font-medium">My APR</th>
-              <th className={`${AT_LG} ${GROUP_EDGE} pb-2.5 text-right font-medium`}>Tx rate</th>
-              <th className={`${AT_2XL} px-2.5 pb-2.5 text-right font-medium`}>Vol rate</th>
-              <th className={`${AT_XL} px-2.5 pb-2.5 text-right font-medium`}>Traders</th>
+              <th className={`${AT_LG} ${GROUP_EDGE} pb-2.5 text-right font-medium`}><SampledHeader>Tx rate</SampledHeader></th>
+              <th className={`${AT_2XL} px-2.5 pb-2.5 text-right font-medium`}><SampledHeader>Vol rate</SampledHeader></th>
+              <th className={`${AT_XL} px-2.5 pb-2.5 text-right font-medium`}><SampledHeader>Traders</SampledHeader></th>
               <th className={`${AT_LG} ${GROUP_EDGE} pb-2.5 text-right font-medium`}>Volatility</th>
               <th className={`${AT_LG} px-2.5 pb-2.5 font-medium`}>Age</th>
               <th className={`${AT_LG} ${GROUP_EDGE} pb-2.5 font-medium`}>Fee</th>
