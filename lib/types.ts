@@ -58,8 +58,17 @@ export type PositionState = 'open' | 'closed' | 'none'
 
 /** Recent trade activity derived from a page of pool transactions. */
 export type Activity = {
+  /**
+   * USD actually traded across the sampled transactions. Observed, not projected: this is the
+   * sum of what the feed returned, and it is what the table shows.
+   */
+  volumeUsd: number
+  /**
+   * The observed figures projected to an hour. Used for ranking, where pools measured over
+   * different spans have to be compared, and deliberately not shown: a pool whose sample covers
+   * forty seconds has not been seen trading for an hour.
+   */
   transactionsPerHour: number
-  /** USD flowing through the pool per hour, measured over the same sampled window. */
   volumeUsdPerHour: number
   uniqueTraders: number
   averageTradeUsd: number

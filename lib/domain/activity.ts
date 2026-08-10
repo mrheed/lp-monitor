@@ -23,6 +23,7 @@ const swapsOnly = (transactions: ActivitySample[]) =>
   transactions.filter((entry) => entry.eventType === undefined || entry.eventType.endsWith('_SWAP'))
 
 const EMPTY: Activity = {
+  volumeUsd: 0,
   transactionsPerHour: 0,
   volumeUsdPerHour: 0,
   uniqueTraders: 0,
@@ -75,10 +76,12 @@ export const computeActivity = (transactions: ActivitySample[]): Activity => {
     .filter((wallet): wallet is string => Boolean(wallet))
 
   const perHour = (amount: number) => (windowSeconds > 0 ? amount / (windowSeconds / 3600) : 0)
+  const volumeUsd = totalTradeUsd(swaps)
 
   return {
+    volumeUsd,
     transactionsPerHour: perHour(swaps.length),
-    volumeUsdPerHour: perHour(totalTradeUsd(swaps)),
+    volumeUsdPerHour: perHour(volumeUsd),
     uniqueTraders: new Set(wallets).size,
     averageTradeUsd: meanTradeUsd(swaps),
     sampleSize: swaps.length,

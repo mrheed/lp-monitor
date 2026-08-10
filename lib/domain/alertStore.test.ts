@@ -73,7 +73,7 @@ describe('interpretAlertState', () => {
     // Losing this resets the watcher to "establishing a baseline" and silently swallows the
     // comparison that a restart interrupted.
     const state = interpretAlertState({
-      reported: { '0xa': { feesPerHourUsd: 100, txPerHour: 5, volumeUsdPerHour: 900 } },
+      reported: { '0xa': { feesPerHourUsd: 100, txCount: 5, volumeUsd: 900, windowSeconds: 600 } },
       reportedSignature: '0xa:100:5:900',
       lastReportAt: 1_700_000_000_000,
     })

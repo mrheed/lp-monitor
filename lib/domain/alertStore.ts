@@ -38,7 +38,13 @@ export type AlertState = {
    */
   reported: Record<
     string,
-    { tvlUsd: number; feesPerHourUsd: number; txPerHour: number | null; volumeUsdPerHour: number | null }
+    {
+      tvlUsd: number
+      feesPerHourUsd: number
+      txCount: number | null
+      volumeUsd: number | null
+      windowSeconds: number | null
+    }
   >
   reportedSignature: string | null
   lastReportAt: number | null

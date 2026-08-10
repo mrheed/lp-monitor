@@ -13,9 +13,10 @@ export type AlertCandidate = {
   /** Which window that rate came from, so the message does not imply more history than exists. */
   recentFeeWindow: string
   /** Trades per hour, or null when the pool has not been measured yet. */
-  txPerHour: number | null
+  txCount: number | null
   /** USD flowing through per hour, or null when the pool has not been measured yet. */
-  volumeUsdPerHour: number | null
+  volumeUsd: number | null
+  windowSeconds: number | null
   krystalUrl: string
   uniswapUrl: string
   /** Wallets holding this pool right now, by their configured label. */
@@ -159,13 +160,13 @@ const usd = (value: number) => {
   return `$${Math.round(value).toLocaleString()}`
 }
 
-/** Compact trade rate, falling back to a daily figure when hourly would round to nothing. */
-const perHour = (value: number) => {
-  if (!Number.isFinite(value)) return '—'
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k/h`
-  if (value >= 1) return `${Math.round(value)}/h`
-  if (value > 0) return `${(value * 24).toFixed(1)}/d`
-  return '0/h'
+/** The span a count was observed over, so a bare number is never shown without its window. */
+const observedSpan = (seconds: number) => {
+  if (!Number.isFinite(seconds) || seconds <= 0) return 'an instant'
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  if (seconds < 3_600) return `${Math.round(seconds / 60)}m`
+  if (seconds < 86_400) return `${Math.round(seconds / 3_600)}h`
+  return `${Math.round(seconds / 86_400)}d`
 }
 
 /**
@@ -203,9 +204,17 @@ export const formatAlert = (
     const fee = pool.dynamicFee ? 'dynamic fee' : `${pool.feeTier}% fee`
     const hook = pool.hasHook ? ' · hook' : ''
 
-    // Trade rate is omitted rather than shown as zero when the pool has not been measured:
-    // a brand new pool with no reading is not the same as one nobody is trading.
-    const trades = pool.txPerHour === null ? 'not yet measured' : `${perHour(pool.txPerHour)} trades`
+    // Stated as what was seen rather than projected from it: "12 trades in 4m" is a count of
+    // what the transaction feed returned, whereas "180 trades/h" claims an hour nobody watched.
+    //
+    // Left as unmeasured rather than shown as zero when there is no reading: a pool that just
+    // appeared is usually absent from the transaction feed, which is not the same as one nobody
+    // is trading.
+    const measured = pool.txCount !== null && pool.windowSeconds !== null
+    const traded = pool.volumeUsd !== null && pool.volumeUsd > 0 ? ` · ${usd(pool.volumeUsd)}` : ''
+    const trades = measured
+      ? `${pool.txCount} trades${traded} in ${observedSpan(pool.windowSeconds ?? 0)}`
+      : 'not yet measured'
     const window =
       pool.recentFeeWindow && pool.recentFeeWindow !== 'none' ? ` ${pool.recentFeeWindow}` : ''
 

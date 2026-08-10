@@ -326,10 +326,10 @@ export const pollOnce = async (): Promise<void> => {
       recentFeeWindow: row.recentFeeWindow,
       // An empty sample means no reading yet, not a pool nobody trades. A brand new pool is
       // usually not in the transaction feed at all, and 0/h would read as dead on arrival.
-      txPerHour:
-        row.activity && row.activity.sampleSize > 0 ? row.activity.transactionsPerHour : null,
-      volumeUsdPerHour:
-        row.activity && row.activity.sampleSize > 0 ? row.activity.volumeUsdPerHour : null,
+      txCount: row.activity && row.activity.sampleSize > 0 ? row.activity.sampleSize : null,
+      volumeUsd: row.activity && row.activity.sampleSize > 0 ? row.activity.volumeUsd : null,
+      windowSeconds:
+        row.activity && row.activity.sampleSize > 0 ? row.activity.windowSeconds : null,
       krystalUrl: row.krystalUrl,
       uniswapUrl: row.uniswapUrl,
       openHolders: row.positionHolders
@@ -382,7 +382,7 @@ const withActivity = async (
   pools: AlertCandidate[],
   rows: Awaited<ReturnType<typeof getPoolsSnapshot>>['rows'],
 ): Promise<AlertCandidate[]> => {
-  const unmeasured = pools.filter((pool) => pool.txPerHour === null)
+  const unmeasured = pools.filter((pool) => pool.txCount === null)
   if (unmeasured.length === 0) return pools
 
   const protocolOf = new Map(rows.map((row) => [row.poolId.toLowerCase(), row.protocol]))
@@ -399,7 +399,12 @@ const withActivity = async (
       const activity = measured[pool.poolId.toLowerCase()]
       return activity === undefined
         ? pool
-        : { ...pool, txPerHour: activity.transactionsPerHour }
+        : {
+            ...pool,
+            txCount: activity.sampleSize,
+            volumeUsd: activity.volumeUsd,
+            windowSeconds: activity.windowSeconds,
+          }
     })
   } catch {
     // Announcing without a rate beats not announcing at all.
@@ -433,8 +438,9 @@ const reportChanges = async (candidates: AlertCandidate[]) => {
     metrics: {
       tvlUsd: pool.tvlUsd,
       feesPerHourUsd: pool.recentFeesPerHourUsd,
-      txPerHour: pool.txPerHour,
-      volumeUsdPerHour: pool.volumeUsdPerHour,
+      txCount: pool.txCount,
+      volumeUsd: pool.volumeUsd,
+      windowSeconds: pool.windowSeconds,
     },
     openHolders: pool.openHolders,
     krystalUrl: pool.krystalUrl,
@@ -518,9 +524,10 @@ export const previewChangeReport = async (): Promise<{
       metrics: {
         tvlUsd: row.tvlUsd,
         feesPerHourUsd: row.recentFeesPerHourUsd,
-        txPerHour: row.activity && row.activity.sampleSize > 0 ? row.activity.transactionsPerHour : null,
-        volumeUsdPerHour:
-          row.activity && row.activity.sampleSize > 0 ? row.activity.volumeUsdPerHour : null,
+        txCount: row.activity && row.activity.sampleSize > 0 ? row.activity.sampleSize : null,
+        volumeUsd: row.activity && row.activity.sampleSize > 0 ? row.activity.volumeUsd : null,
+        windowSeconds:
+          row.activity && row.activity.sampleSize > 0 ? row.activity.windowSeconds : null,
       },
       openHolders: row.positionHolders
         .filter((holder) => holder.state === 'open')

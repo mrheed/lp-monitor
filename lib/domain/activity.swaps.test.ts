@@ -35,7 +35,7 @@ describe('trade volume', () => {
     const activity = computeActivity([at(0, 5_000, ADD), at(60, 5_000, ADD)])
 
     expect(activity.sampleSize).toBe(0)
-    expect(activity.volumeUsdPerHour).toBe(0)
+    expect(activity.volumeUsd).toBe(0)
   })
 
   it('keeps a row that reports no event type', () => {

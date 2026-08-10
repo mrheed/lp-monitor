@@ -11,6 +11,7 @@ import type { Activity } from '../types'
 /** Builds the activity fields the score reads. */
 const activity = (transactionsPerHour: number, uniqueTraders: number): Activity => ({
   transactionsPerHour,
+  volumeUsd: 0,
   volumeUsdPerHour: 0,
   uniqueTraders,
   averageTradeUsd: 0,

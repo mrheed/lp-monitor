@@ -36,8 +36,8 @@ const SORT_LABELS: Record<SortKey, string> = {
   recentFeesPerHourUsd: 'Recent fee rate',
   totalFeesUsd: 'Fees accumulated',
   tvlAsc: 'TVL, thinnest first',
-  rate: 'Tx rate ~',
-  volumeRate: 'Volume rate ~',
+  rate: 'Trades seen ~',
+  volumeRate: 'Volume traded ~',
   traders: 'Traders ~',
   priceVolatility: 'Volatility, calmest first',
   myApr: 'My projected APR',
@@ -134,6 +134,19 @@ const volatilityTone = (percent: number) =>
   percent >= 60 ? 'text-risk' : percent >= 25 ? 'text-caution' : 'text-ink-muted'
 
 /**
+ * The span a sample covered, as a compact label.
+ *
+ * Every observed figure is shown beside one of these. A count of 25 trades means nothing until
+ * you know whether it took forty seconds or three hours.
+ */
+const span = (seconds: number) => {
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  if (seconds < 3_600) return `${Math.round(seconds / 60)}m`
+  if (seconds < 86_400) return `${Math.round(seconds / 3_600)}h`
+  return `${Math.round(seconds / 86_400)}d`
+}
+
+/**
  * Why the trade columns carry a mark.
  *
  * TVL and fees are published totals from the pool feed. Trade rate, volume rate and trader count
@@ -142,7 +155,7 @@ const volatilityTone = (percent: number) =>
  * read as though they carried the same authority.
  */
 const SAMPLED_TITLE =
-  'Extrapolated from the last ~25 trades, not reported by the pool feed. A short sample makes this figure jumpy.'
+  'Counted from the most recent transactions Uniswap returned, over the span shown beneath. Not reported by the pool feed.'
 
 const SampledHeader = ({ children }: { children: ReactNode }) => (
   <span title={SAMPLED_TITLE}>
@@ -463,8 +476,10 @@ const PoolCard = ({
             ? `${(sim.aprPercent / 1000).toFixed(1)}k%`
             : `${sim.aprPercent.toFixed(0)}%`}
         </CardStat>
-        <CardStat label="Tx rate ~">
-          {row.activity ? rate(row.activity.transactionsPerHour) : missing}
+        <CardStat label="Trades ~">
+          {row.activity
+            ? `${row.activity.sampleSize} in ${span(row.activity.windowSeconds)}`
+            : missing}
         </CardStat>
         <CardStat label="Volatility" tone={volatilityTone(row.priceVolatility)}>
           {`${row.priceVolatility.toFixed(1)}%`}
@@ -1054,8 +1069,8 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
               <th className={`${AT_2XL} px-2.5 pb-2.5 text-right font-medium`}>My share</th>
               <th className={`${AT_2XL} px-2.5 pb-2.5 text-right font-medium`}>My fees</th>
               <th className="px-2.5 pb-2.5 text-right font-medium">My APR</th>
-              <th className={`${AT_LG} ${GROUP_EDGE} pb-2.5 text-right font-medium`}><SampledHeader>Tx rate</SampledHeader></th>
-              <th className={`${AT_2XL} px-2.5 pb-2.5 text-right font-medium`}><SampledHeader>Vol rate</SampledHeader></th>
+              <th className={`${AT_LG} ${GROUP_EDGE} pb-2.5 text-right font-medium`}><SampledHeader>Trades</SampledHeader></th>
+              <th className={`${AT_2XL} px-2.5 pb-2.5 text-right font-medium`}><SampledHeader>Traded</SampledHeader></th>
               <th className={`${AT_XL} px-2.5 pb-2.5 text-right font-medium`}><SampledHeader>Traders</SampledHeader></th>
               <th className={`${AT_LG} ${GROUP_EDGE} pb-2.5 text-right font-medium`}>Volatility</th>
               <th className={`${AT_LG} px-2.5 pb-2.5 font-medium`}>Age</th>
@@ -1152,10 +1167,24 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
                   </td>
 
                   <td className={`${AT_LG} ${CELL_EDGE} text-right tabular-nums text-ink-muted`}>
-                    {row.activity ? rate(row.activity.transactionsPerHour) : missing}
+                    {row.activity ? (
+                      <>
+                        {row.activity.sampleSize}
+                        <div className={SUB}>in {span(row.activity.windowSeconds)}</div>
+                      </>
+                    ) : (
+                      missing
+                    )}
                   </td>
                   <td className={`${AT_2XL} ${CELL} text-right tabular-nums text-ink-muted`}>
-                    {row.activity ? `${usd(row.activity.volumeUsdPerHour)}/h` : missing}
+                    {row.activity ? (
+                      <>
+                        {usd(row.activity.volumeUsd)}
+                        <div className={SUB}>in {span(row.activity.windowSeconds)}</div>
+                      </>
+                    ) : (
+                      missing
+                    )}
                   </td>
                   <td className={`${AT_XL} ${CELL} text-right tabular-nums text-ink0`}>
                     {row.activity ? row.activity.uniqueTraders : missing}

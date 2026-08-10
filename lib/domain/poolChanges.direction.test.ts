@@ -9,8 +9,9 @@ const metrics = (
 ): PoolMetrics => ({
   tvlUsd: tvl,
   feesPerHourUsd: fees,
-  txPerHour: tx,
-  volumeUsdPerHour: volume,
+  txCount: tx,
+  windowSeconds: 600,
+  volumeUsd: volume,
 })
 
 /** Builds the single-row report that a direction assertion reads. */

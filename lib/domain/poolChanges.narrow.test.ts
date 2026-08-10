@@ -14,8 +14,9 @@ const metrics = (
 ): PoolMetrics => ({
   tvlUsd: tvl,
   feesPerHourUsd: fees,
-  txPerHour: tx,
-  volumeUsdPerHour: volume,
+  txCount: tx,
+  volumeUsd: volume,
+  windowSeconds: 600,
 })
 
 const input = (poolId: string, pair: string, m: PoolMetrics, openHolders: string[] = []) => ({

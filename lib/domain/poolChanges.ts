@@ -2,8 +2,11 @@
 export type PoolMetrics = {
   tvlUsd: number
   feesPerHourUsd: number
-  txPerHour: number | null
-  volumeUsdPerHour: number | null
+  /** Trades counted in the sample, and the USD they moved. Null until a pool has been measured. */
+  txCount: number | null
+  volumeUsd: number | null
+  /** Seconds the counted trades covered, so a count is never read without its span. */
+  windowSeconds: number | null
 }
 
 /** A pool in the report, with the state it was last reported in. */
@@ -32,15 +35,24 @@ export const REPORT_LIMIT = 15
 /**
  * Marks a figure that is extrapolated from a sample rather than reported by the pool feed.
  *
- * TVL and fees come from the feed as published totals. Trade rate and volume rate are computed
- * here from about 25 transactions, whose span is often under two minutes, then scaled to an
- * hour. The two kinds sit in adjacent rows, and without a mark a reader has no way to tell that
- * one pair carries far more uncertainty than the other.
+ * TVL and fees come from the pool feed as published totals covering a fixed window. Trades and
+ * traded volume are counted here from the transactions Uniswap returned, over whatever span
+ * those happened to cover. Both are facts, but they answer over different periods, so the mark
+ * warns that the pair beneath it is not measured against the same clock.
  */
 export const SAMPLED_MARK = '~'
 
+/** The span a count covered, so the marked rows are never read without their window. */
+export const observedSpan = (seconds: number | null): string => {
+  if (seconds === null || !Number.isFinite(seconds) || seconds <= 0) return '—'
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  if (seconds < 3_600) return `${Math.round(seconds / 60)}m`
+  if (seconds < 86_400) return `${Math.round(seconds / 3_600)}h`
+  return `${Math.round(seconds / 86_400)}d`
+}
+
 /** Spelled out once per message, rather than repeated against every marked figure. */
-export const SAMPLED_NOTE = `${SAMPLED_MARK} sampled from recent trades, not reported`
+export const SAMPLED_NOTE = `${SAMPLED_MARK} counted from recent trades, over the span shown`
 
 /**
  * Pairs each monitored pool with the state it was last reported in.
@@ -170,7 +182,7 @@ export const changeTableLines = (
 
   // Several watched pools can share a pair, since ETH/USDG alone spans sixteen on this chain, so
   // the id fragment is what actually tells two rows apart.
-  const header = `${pad('POOL', 22)}${pad('TVL', 15)}${pad('FEES/H', 15)}${pad(`TX/H${SAMPLED_MARK}`, 13)}${pad(`VOL/H${SAMPLED_MARK}`, 15)}HELD BY`
+  const header = `${pad('POOL', 22)}${pad('TVL', 15)}${pad('FEES/H', 15)}${pad(`TRADES${SAMPLED_MARK}`, 13)}${pad(`TRADED${SAMPLED_MARK}`, 15)}${pad('OVER', 8)}HELD BY`
   const lines = listed.map((row) => {
     const fees = shift(
       row.before ? usdCell(row.before.feesPerHourUsd) : null,
@@ -178,13 +190,13 @@ export const changeTableLines = (
       decorate,
     )
     const tx = shift(
-      row.before ? countCell(row.before.txPerHour) : null,
-      countCell(row.after.txPerHour),
+      row.before ? countCell(row.before.txCount) : null,
+      countCell(row.after.txCount),
       decorate,
     )
     const volume = shift(
-      row.before ? usdCell(row.before.volumeUsdPerHour) : null,
-      usdCell(row.after.volumeUsdPerHour),
+      row.before ? usdCell(row.before.volumeUsd) : null,
+      usdCell(row.after.volumeUsd),
       decorate,
     )
 
@@ -192,7 +204,7 @@ export const changeTableLines = (
     const name = `${row.pair} ${row.poolId.slice(2, 8)}`
     const held = row.openHolders.length > 0 ? row.openHolders.join(', ') : '-'
 
-    return `${pad(name, 22)}${pad(tvl, 15)}${pad(fees, 15)}${pad(tx, 13)}${pad(volume, 15)}${held}`
+    return `${pad(name, 22)}${pad(tvl, 15)}${pad(fees, 15)}${pad(tx, 13)}${pad(volume, 15)}${pad(observedSpan(row.after.windowSeconds), 8)}${held}`
   })
 
   return [header, ...lines]
@@ -221,8 +233,9 @@ export const changeBlockLines = (rows: ChangeRow[], decorate: Decorate = (text) 
       `  fees  ${cell(row.before?.feesPerHourUsd, row.after.feesPerHourUsd, usdCell)}`,
       // The mark is absorbed into the existing label padding rather than added after it, so
       // every value still begins at the same column.
-      `  tx${SAMPLED_MARK}   ${cell(row.before?.txPerHour, row.after.txPerHour, countCell)}`,
-      `  vol${SAMPLED_MARK}  ${cell(row.before?.volumeUsdPerHour, row.after.volumeUsdPerHour, usdCell)}`,
+      `  tx${SAMPLED_MARK}   ${cell(row.before?.txCount, row.after.txCount, countCell)}`,
+      `  vol${SAMPLED_MARK}  ${cell(row.before?.volumeUsd, row.after.volumeUsd, usdCell)}`,
+      `  over  ${observedSpan(row.after.windowSeconds)}`,
     ]
 
     return row.openHolders.length > 0 ? [...lines, `  held  ${row.openHolders.join(', ')}`] : lines
@@ -278,7 +291,7 @@ export const reportSignature = (
       (pool) =>
         `${pool.poolId.toLowerCase()}:${usdCell(pool.metrics.tvlUsd)}:${usdCell(
           pool.metrics.feesPerHourUsd,
-        )}:${countCell(pool.metrics.txPerHour)}:${usdCell(pool.metrics.volumeUsdPerHour)}`,
+        )}:${countCell(pool.metrics.txCount)}:${usdCell(pool.metrics.volumeUsd)}`,
     )
     .join('|')
 
@@ -311,7 +324,7 @@ export const hasMaterialChange = (rows: ChangeRow[], minFraction: number): boole
     return (
       moved(row.before.tvlUsd, row.after.tvlUsd) >= minFraction ||
       moved(row.before.feesPerHourUsd, row.after.feesPerHourUsd) >= minFraction ||
-      moved(row.before.txPerHour, row.after.txPerHour) >= minFraction ||
-      moved(row.before.volumeUsdPerHour, row.after.volumeUsdPerHour) >= minFraction
+      moved(row.before.txCount, row.after.txCount) >= minFraction ||
+      moved(row.before.volumeUsd, row.after.volumeUsd) >= minFraction
     )
   })

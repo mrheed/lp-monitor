@@ -10,8 +10,8 @@ import {
 const row = (): ChangeRow => ({
   poolId: '0xabcdef1234',
   pair: 'ETH/USDG',
-  before: { tvlUsd: 1_000, feesPerHourUsd: 10, txPerHour: 30, volumeUsdPerHour: 5_000 },
-  after: { tvlUsd: 1_200, feesPerHourUsd: 15, txPerHour: 45, volumeUsdPerHour: 7_000 },
+  before: { tvlUsd: 1_000, feesPerHourUsd: 10, txCount: 30, volumeUsd: 5_000, windowSeconds: 600 },
+  after: { tvlUsd: 1_200, feesPerHourUsd: 15, txCount: 45, volumeUsd: 7_000, windowSeconds: 600 },
   openHolders: [],
   krystalUrl: 'https://defi.krystal.app/pools/detail?poolAddress=0xabcdef1234',
 })
@@ -55,14 +55,15 @@ describe('the monitored pool report', () => {
     const message = formatChangeReport([row()])
 
     expect(message).toContain(SAMPLED_MARK)
-    expect(message.toLowerCase()).toContain('sampled')
+    expect(message.toLowerCase()).toContain('counted from recent trades')
   })
 
   it('marks the sampled columns in the terminal table too', () => {
     const [header] = changeTableLines([row()])
 
-    expect(header).toContain(`TX/H${SAMPLED_MARK}`)
-    expect(header).toContain(`VOL/H${SAMPLED_MARK}`)
+    expect(header).toContain(`TRADES${SAMPLED_MARK}`)
+    expect(header).toContain(`TRADED${SAMPLED_MARK}`)
+    expect(header).toContain('OVER')
     expect(header).not.toContain(`TVL${SAMPLED_MARK}`)
   })
 })

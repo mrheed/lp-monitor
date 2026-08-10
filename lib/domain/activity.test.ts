@@ -76,7 +76,7 @@ describe('computeActivity', () => {
     const activity = computeActivity(transactions)
 
     expect(activity.windowSeconds).toBe(3600)
-    expect(activity.volumeUsdPerHour).toBeCloseTo(1000, 5)
+    expect(activity.volumeUsd).toBeCloseTo(1000, 5)
     expect(activity.transactionsPerHour).toBeCloseTo(4, 5)
   })
 
@@ -85,6 +85,14 @@ describe('computeActivity', () => {
 
     expect(Number.isFinite(activity.volumeUsdPerHour)).toBe(true)
     expect(activity.volumeUsdPerHour).toBe(0)
+  })
+
+  it('still reports the volume observed when the sample spans no time', () => {
+    // Two trades in the same second have no span to project from, but a thousand dollars did
+    // change hands. The projection is what is undefined here, not the observation.
+    const activity = computeActivity([tx(0, '0xa', 500), tx(0, '0xb', 500)])
+
+    expect(activity.volumeUsd).toBe(1_000)
   })
 
   it('averages trade size across the sample, ignoring missing amounts', () => {

@@ -21,8 +21,9 @@ const pool = (
     recentFeesPerHourUsd = 120,
     totalFeesUsd = 9_400,
     recentFeeWindow = '1h',
-    txPerHour = 340,
-    volumeUsdPerHour = 5_000,
+    txCount = 340,
+    volumeUsd = 5_000,
+    windowSeconds = 600,
     krystalUrl = 'https://defi.krystal.app/pools/detail?chainId=4663&poolAddress=0xabc&protocol=uniswapv4',
     uniswapUrl = 'https://app.uniswap.org/explore/pools/robinhood/0xabc',
     openHolders = [],
@@ -30,6 +31,7 @@ const pool = (
 ): AlertCandidate => ({
   poolId,
   pair: 'ETH/USDG',
+  windowSeconds,
   feeTier,
   dynamicFee,
   hasHook,
@@ -37,8 +39,8 @@ const pool = (
   recentFeesPerHourUsd,
   totalFeesUsd,
   recentFeeWindow,
-  txPerHour,
-  volumeUsdPerHour,
+  txCount,
+  volumeUsd,
   krystalUrl,
   uniswapUrl,
   openHolders,
@@ -163,20 +165,31 @@ describe('formatAlert', () => {
     expect(formatAlert([pool('a', { totalFeesUsd: 77_800 })])).toContain('$77.8k total')
   })
 
-  it('reports the trade rate', () => {
-    expect(formatAlert([pool('a', { txPerHour: 1_700 })])).toContain('1.7k/h trades')
+  it('reports the trades seen and the span they were seen over', () => {
+    // A count without its window says nothing: 1,700 trades in ten minutes and 1,700 in a week
+    // describe completely different pools.
+    const message = formatAlert([pool('a', { txCount: 1_700, windowSeconds: 600 })])
+
+    expect(message).toContain('1700 trades · $5.0k in 10m')
   })
 
   it('says a pool is unmeasured rather than showing it as idle', () => {
     // A pool that just appeared has no reading yet, and zero would read as "nobody trades it".
-    const message = formatAlert([pool('a', { txPerHour: null })])
+    const message = formatAlert([pool('a', { txCount: null })])
 
     expect(message).toContain('not yet measured')
     expect(message).not.toContain('0/h trades')
   })
 
-  it('falls back to a daily figure when an hourly rate would round to nothing', () => {
-    expect(formatAlert([pool('a', { txPerHour: 0.25 })])).toContain('6.0/d trades')
+  it('reports a long span in its own units rather than as thousands of seconds', () => {
+    const message = formatAlert([pool('a', { txCount: 4, volumeUsd: 0, windowSeconds: 7_200 })])
+
+    expect(message).toContain('4 trades in 2h')
+  })
+
+  it('accumulates the volume the transactions actually moved', () => {
+    // Summed from the amountUsd of each swap the feed returned, not projected from a rate.
+    expect(formatAlert([pool('a', { volumeUsd: 12_400 })])).toContain('$12.4k')
   })
 
   it('omits the window when there is none to report', () => {
