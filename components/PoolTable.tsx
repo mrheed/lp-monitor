@@ -18,6 +18,7 @@ import type { AlertStatus } from '@/lib/domain/alertWatcher'
 import { DEFAULT_FILTERS, type AlertFilters } from '@/lib/domain/newPools'
 import { rankByScore, scorePools } from '@/lib/domain/score'
 import { simulateFeeShare } from '@/lib/domain/simulate'
+import { HOURS, simulateCompounding, type CompoundOutcome } from '@/lib/domain/compound'
 import type { Activity, PoolRow, PositionState } from '@/lib/types'
 
 type SortKey =
@@ -30,6 +31,7 @@ type SortKey =
   | 'traders'
   | 'priceVolatility'
   | 'myApr'
+  | 'compounded'
 
 const SORT_LABELS: Record<SortKey, string> = {
   score: 'Score',
@@ -41,6 +43,7 @@ const SORT_LABELS: Record<SortKey, string> = {
   traders: 'Traders ~',
   priceVolatility: 'Volatility, calmest first',
   myApr: 'My projected APR',
+  compounded: 'Projected profit, compounded',
 }
 
 const usd = (value: number) => {
@@ -121,7 +124,7 @@ const LINK =
   'rounded-sm text-ink-muted underline decoration-line underline-offset-2 transition-colors hover:text-ink hover:decoration-accent-dim focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent'
 
 /** Column count, used by the empty state's spanning cell. */
-const TABLE_COLUMNS = 18
+const TABLE_COLUMNS = 19
 
 /**
  * Volatility as a status colour.
@@ -168,7 +171,54 @@ const SampledHeader = ({ children }: { children: ReactNode }) => (
 )
 
 /** Reads the value a sort key refers to, unwrapping activity and inverting the ascending keys. */
-const sortValue = (row: PoolRow, key: SortKey, depositUsd: number) => {
+/**
+ * Horizons the projection is offered over.
+ *
+ * Nothing beyond a year is offered, because the projection holds the pool's current fee rate
+ * constant and no pool on this chain has held a rate for a year.
+ */
+const HORIZONS = [
+  { id: '7d', label: '7 days', hours: HOURS.week },
+  { id: '30d', label: '30 days', hours: HOURS.month },
+  { id: '90d', label: '90 days', hours: HOURS.quarter },
+  { id: '1y', label: '1 year', hours: HOURS.year },
+] as const
+
+/** How often fees are put back into the position. */
+const FREQUENCIES = [
+  { id: 'never', label: 'Never', hours: 0 },
+  { id: 'daily', label: 'Daily', hours: HOURS.day },
+  { id: 'weekly', label: 'Weekly', hours: HOURS.week },
+  { id: 'monthly', label: 'Monthly', hours: HOURS.month },
+] as const
+
+type HorizonId = (typeof HORIZONS)[number]['id']
+type FrequencyId = (typeof FREQUENCIES)[number]['id']
+
+/** What the reader is projecting: how much, for how long, reinvested how often, at what cost. */
+type Projection = {
+  depositUsd: number
+  horizonHours: number
+  compoundEveryHours: number
+  costPerCompoundUsd: number
+}
+
+/** Names a horizon by its hour count, so the label and the projection cannot disagree. */
+const horizonLabel = (hours: number) =>
+  HORIZONS.find((option) => option.hours === hours)?.label ?? `${Math.round(hours / 24)} days`
+
+/** Projects one row under the reader's current settings. */
+const projectRow = (row: PoolRow, projection: Projection): CompoundOutcome =>
+  simulateCompounding({
+    depositUsd: projection.depositUsd,
+    poolTvlUsd: row.tvlUsd,
+    poolFeesPerHourUsd: row.recentFeesPerHourUsd,
+    horizonHours: projection.horizonHours,
+    compoundEveryHours: projection.compoundEveryHours,
+    costPerCompoundUsd: projection.costPerCompoundUsd,
+  })
+
+const sortValue = (row: PoolRow, key: SortKey, projection: Projection) => {
   switch (key) {
     case 'score':
       return row.score ?? -1
@@ -176,7 +226,10 @@ const sortValue = (row: PoolRow, key: SortKey, depositUsd: number) => {
       // Negated so the shared descending sort puts the calmest pool first.
       return -row.priceVolatility
     case 'myApr':
-      return simulateFeeShare(depositUsd, row.tvlUsd, row.recentFeesPerHourUsd).aprPercent
+      return simulateFeeShare(projection.depositUsd, row.tvlUsd, row.recentFeesPerHourUsd)
+        .aprPercent
+    case 'compounded':
+      return projectRow(row, projection).netProfitUsd
     case 'tvlAsc':
       // Negated so the shared descending sort puts the thinnest pool first.
       return -row.tvlUsd
@@ -418,6 +471,7 @@ const PoolCard = ({
   row,
   rank,
   depositUsd,
+  projection,
   watched,
   onToggleWatch,
   showWalletNames,
@@ -425,11 +479,13 @@ const PoolCard = ({
   row: PoolRow
   rank: number
   depositUsd: number
+  projection: Projection
   watched: boolean
   onToggleWatch: (poolId: string) => void
   showWalletNames: boolean
 }) => {
   const sim = simulateFeeShare(depositUsd, row.tvlUsd, row.recentFeesPerHourUsd)
+  const projected = projectRow(row, projection)
 
   return (
     <li className={`rounded border border-line px-3.5 py-3 ${CARD_TONE[row.position]}`}>
@@ -471,6 +527,9 @@ const PoolCard = ({
       <div className="mt-3 grid grid-cols-3 gap-x-3 gap-y-2.5 text-sm">
         <CardStat label="Fee rate" tone="text-gain">{`${usd(row.recentFeesPerHourUsd)}/h`}</CardStat>
         <CardStat label="Pool TVL">{usd(row.tvlUsd)}</CardStat>
+        <CardStat label={`Profit ${horizonLabel(projection.horizonHours)}`} tone="text-gain">
+          {projected.netProfitUsd > 0 ? usd(projected.netProfitUsd) : missing}
+        </CardStat>
         <CardStat label="My APR" tone="text-gain">
           {sim.aprPercent >= 1000
             ? `${(sim.aprPercent / 1000).toFixed(1)}k%`
@@ -519,6 +578,9 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
   const [lazyActivity, setLazyActivity] = useState<Record<string, Activity>>({})
   const [visibleCount, setVisibleCount] = useState(ROW_PAGE_SIZE)
   const [depositUsd, setDepositUsd] = useState(1_000)
+  const [horizon, setHorizon] = useState<HorizonId>('30d')
+  const [frequency, setFrequency] = useState<FrequencyId>('weekly')
+  const [costPerCompoundUsd, setCostPerCompoundUsd] = useState(2)
   const [refreshing, setRefreshing] = useState(false)
   const [staleSince, setStaleSince] = useState<number | null>(null)
   const [unmeasurable, setUnmeasurable] = useState(0)
@@ -664,6 +726,16 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
     }
   }, [])
 
+  const projection = useMemo<Projection>(
+    () => ({
+      depositUsd,
+      horizonHours: HORIZONS.find((option) => option.id === horizon)?.hours ?? HOURS.month,
+      compoundEveryHours: FREQUENCIES.find((option) => option.id === frequency)?.hours ?? 0,
+      costPerCompoundUsd,
+    }),
+    [depositUsd, horizon, frequency, costPerCompoundUsd],
+  )
+
   const protocols = useMemo(
     () => [...new Set(serverRows.map((row) => row.protocol))].sort(),
     [serverRows],
@@ -730,8 +802,10 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
       return true
     })
 
-    return [...filtered].sort((a, b) => sortValue(b, sortKey, depositUsd) - sortValue(a, sortKey, depositUsd))
-  }, [rows, query, minTvl, onlyMine, protocol, sortKey, depositUsd])
+    return [...filtered].sort(
+      (a, b) => sortValue(b, sortKey, projection) - sortValue(a, sortKey, projection),
+    )
+  }, [rows, query, minTvl, onlyMine, protocol, sortKey, projection])
 
   const onScreen = visible.slice(0, visibleCount)
 
@@ -959,6 +1033,64 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
           </span>
         </label>
 
+        {/*
+          Grouped with the deposit because they answer one question together: what this much
+          money does in this pool over this long. Split across the control bar they would read as
+          four unrelated filters.
+        */}
+        <label className="flex items-center gap-2 text-ink-muted">
+          <span className="text-ink0">for</span>
+          <select
+            value={horizon}
+            onChange={(event) => setHorizon(horizonIdFrom(event.target.value))}
+            className={control}
+          >
+            {HORIZONS.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-ink-muted">
+          <span className="text-ink0">reinvest</span>
+          <select
+            value={frequency}
+            onChange={(event) => setFrequency(frequencyIdFrom(event.target.value))}
+            className={control}
+          >
+            {FREQUENCIES.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {frequency === 'never' ? null : (
+          <label
+            className="flex items-center gap-2 text-ink-muted"
+            title="Gas and swap cost of one reinvestment. A reinvestment is skipped when the extra fees it would earn do not repay this."
+          >
+            <span className="text-ink0">at</span>
+            <span className="relative">
+              <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-ghost">
+                $
+              </span>
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                value={costPerCompoundUsd}
+                onChange={(event) =>
+                  setCostPerCompoundUsd(Math.max(0, Number(event.target.value) || 0))
+                }
+                className={`w-20 pl-5 ${control} tabular-nums`}
+              />
+            </span>
+            <span className="text-ink-ghost">gas</span>
+          </label>
+        )}
+
         {staleSince === null ? null : (
           <span
             className="w-full text-xs text-ink-muted sm:ml-auto sm:w-auto"
@@ -1010,6 +1142,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
             row={row}
             rank={index + 1}
             depositUsd={depositUsd}
+            projection={projection}
             watched={watched.has(row.poolId.toLowerCase())}
             onToggleWatch={toggleWatch}
             showWalletNames={walletCount > 1}
@@ -1044,7 +1177,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
               <th className={`${GROUP_EDGE} pb-1 pt-3 text-right font-medium`} colSpan={2}>
                 Earnings
               </th>
-              <th className={`${GROUP_EDGE} pb-1 pt-3 text-right font-medium`} colSpan={4}>
+              <th className={`${GROUP_EDGE} pb-1 pt-3 text-right font-medium`} colSpan={5}>
                 Capital, at ${depositUsd.toLocaleString()}
               </th>
               <th className={`${GROUP_EDGE} pb-1 pt-3 text-right font-medium`} colSpan={3}>
@@ -1069,6 +1202,12 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
               <th className={`${AT_2XL} px-2.5 pb-2.5 text-right font-medium`}>My share</th>
               <th className={`${AT_2XL} px-2.5 pb-2.5 text-right font-medium`}>My fees</th>
               <th className="px-2.5 pb-2.5 text-right font-medium">My APR</th>
+              <th
+                className="px-2.5 pb-2.5 text-right font-medium"
+                title="Net profit over the chosen horizon, after the cost of each reinvestment. A projection at the pool's current fee rate, ignoring impermanent loss."
+              >
+                Profit {horizonLabel(projection.horizonHours)}
+              </th>
               <th className={`${AT_LG} ${GROUP_EDGE} pb-2.5 text-right font-medium`}><SampledHeader>Trades</SampledHeader></th>
               <th className={`${AT_2XL} px-2.5 pb-2.5 text-right font-medium`}><SampledHeader>Traded</SampledHeader></th>
               <th className={`${AT_XL} px-2.5 pb-2.5 text-right font-medium`}><SampledHeader>Traders</SampledHeader></th>
@@ -1096,6 +1235,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
             ) : null}
             {onScreen.map((row, index) => {
               const sim = simulateFeeShare(depositUsd, row.tvlUsd, row.recentFeesPerHourUsd)
+              const projected = projectRow(row, projection)
 
               return (
                 <tr
@@ -1164,6 +1304,20 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
                     {sim.aprPercent >= 1000
                       ? `${(sim.aprPercent / 1000).toFixed(1)}k%`
                       : `${sim.aprPercent.toFixed(0)}%`}
+                  </td>
+                  <td
+                    className={`${CELL} text-right tabular-nums text-gain`}
+                    title={
+                      projected.compounds > 0
+                        ? `${projected.compounds} reinvestments costing ${usd(projected.costsUsd)}, ` +
+                          `worth ${usd(projected.compoundingGainUsd)} more than leaving fees unclaimed`
+                        : 'No reinvestment repays its cost here, so fees are left to accumulate'
+                    }
+                  >
+                    {projected.netProfitUsd > 0 ? usd(projected.netProfitUsd) : missing}
+                    <div className={SUB}>
+                      {projected.compounds > 0 ? `+${usd(projected.compoundingGainUsd)}` : 'no compound'}
+                    </div>
                   </td>
 
                   <td className={`${AT_LG} ${CELL_EDGE} text-right tabular-nums text-ink-muted`}>
@@ -1246,3 +1400,15 @@ const sortKeyFrom = (value: string): SortKey => (isSortKey(value) ? value : 'sco
 
 /** Type guard tying the SortKey union to the label map that enumerates it. */
 const isSortKey = (value: string): value is SortKey => value in SORT_LABELS
+
+/**
+ * Narrows a select value back to its option id by looking it up in the options themselves.
+ *
+ * Derived from the option list rather than asserted, so adding a horizon or a frequency cannot
+ * leave a value the type says is impossible.
+ */
+const horizonIdFrom = (value: string): HorizonId =>
+  HORIZONS.find((option) => option.id === value)?.id ?? '30d'
+
+const frequencyIdFrom = (value: string): FrequencyId =>
+  FREQUENCIES.find((option) => option.id === value)?.id ?? 'weekly'
