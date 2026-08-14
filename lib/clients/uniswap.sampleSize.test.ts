@@ -48,7 +48,7 @@ describe('the sample size', () => {
   it('sends the default when a caller asks for nothing in particular', async () => {
     const bodies = captureRequests()
 
-    await fetchActivity([{ poolId: POOL, protocol: 'uniswapv4' }])
+    await fetchActivity([{ poolId: POOL, protocol: 'uniswapv4', chainId: 4663 }])
 
     expect(pageSizeOf(bodies[0])).toBe(TX_SAMPLE_SIZE)
   })
@@ -58,7 +58,7 @@ describe('the sample size', () => {
     // longer span it exists to buy would never arrive.
     const bodies = captureRequests()
 
-    await fetchActivity([{ poolId: POOL, protocol: 'uniswapv4' }], TX_SAMPLE_SIZE_WATCHED)
+    await fetchActivity([{ poolId: POOL, protocol: 'uniswapv4', chainId: 4663 }], TX_SAMPLE_SIZE_WATCHED)
 
     expect(pageSizeOf(bodies[0])).toBe(TX_SAMPLE_SIZE_WATCHED)
   })

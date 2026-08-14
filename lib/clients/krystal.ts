@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { CHAIN_ID, PROTOCOL } from '../config'
+import { enabledChains } from '../chains'
 import { krystalTopPoolsSchema, type KrystalPool } from '../types'
 import type { DirectPosition, VaultPool } from '../domain/positions'
 
@@ -141,11 +141,27 @@ const getJson = async (url: string) => {
   return response.json()
 }
 
-/** Fetches every tracked pool on the chain, newest stats included. */
-export const fetchTopPools = async (): Promise<KrystalPool[]> => {
-  const url = `${BASE}/lp_explorer/top_pools?chainId=${CHAIN_ID}&skipCheckAutomation=false&protocol=${PROTOCOL}`
+/** Fetches every pool the feed lists for one chain, newest stats included. */
+const fetchChainPools = async (chainId: number): Promise<KrystalPool[]> => {
+  const url = `${BASE}/lp_explorer/top_pools?chainId=${chainId}&skipCheckAutomation=false`
   const { result } = krystalTopPoolsSchema.parse(await getJson(url))
   return result
+}
+
+/**
+ * Fetches every tracked pool across every enabled chain.
+ *
+ * The `protocol` query parameter is not sent because the endpoint ignores it: asking Base for
+ * `uniswapv4`, for `aerodrome`, or for nothing at all returns the same 761 pools spanning six
+ * protocols. Sending it would suggest a filter that does not exist.
+ *
+ * Chains are fetched together rather than in sequence, since they share nothing but the merge.
+ * One chain failing takes the whole refresh down deliberately: a partial pool list would rank
+ * pools against an incomplete cohort, and the score is a percentile within whatever it is given.
+ */
+export const fetchTopPools = async (): Promise<KrystalPool[]> => {
+  const perChain = await Promise.all(enabledChains().map((chain) => fetchChainPools(chain.id)))
+  return perChain.flat()
 }
 
 /**
@@ -161,7 +177,9 @@ const fetchDirectPositionsByStatus = async (
   const params = new URLSearchParams({
     addresses: wallet,
     walletAddress: wallet,
-    chainIds: String(CHAIN_ID),
+    chainIds: enabledChains()
+      .map((chain) => chain.id)
+      .join(','),
     quoteSymbols: 'usd',
     limit: '200',
   })

@@ -7,7 +7,11 @@ export const dynamic = 'force-dynamic'
 const requestSchema = z.object({
   targets: z
     .array(
-      z.object({ poolId: z.string().min(1), protocol: z.string().min(1) }),
+      z.object({
+        poolId: z.string().min(1),
+        protocol: z.string().min(1),
+        chainId: z.number(),
+      }),
     )
     .max(200),
 })

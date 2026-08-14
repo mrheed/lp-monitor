@@ -1,6 +1,6 @@
 import { cached, peekWithAge, remember } from '../cache'
 import { fetchTopPools, fetchWalletPositions } from '../clients/krystal'
-import { fetchActivity } from '../clients/uniswap'
+import { fetchActivity, type ActivityTarget } from '../clients/uniswap'
 import {
   ACTIVITY_CACHE_TTL_MS,
   ACTIVITY_MAX_AGE_MS,
@@ -107,7 +107,7 @@ const toRow = (
     positionVia,
     positionHolders,
     krystalUrl: krystalPoolUrl(pool.chainId, pool.poolAddress, pool.protocol),
-    uniswapUrl: uniswapPoolUrl(pool.poolAddress),
+    uniswapUrl: uniswapPoolUrl(pool.chainId, pool.poolAddress),
     age: estimatePoolAge(
       {
         hour: pool.stat1h.volumeUsd,
@@ -130,7 +130,7 @@ const toRow = (
  * batch, so scrolling back over rows costs nothing.
  */
 export const loadActivityFor = async (
-  targets: { poolId: string; protocol: string }[],
+  targets: ActivityTarget[],
   sampleSize: number = TX_SAMPLE_SIZE,
 ) => {
   const answers = new Map<string, Activity>()
@@ -180,7 +180,7 @@ const refreshing = new Set<string>()
 
 /** Re-measures aged pools without holding up the request that noticed they were aged. */
 const refreshInBackground = async (
-  targets: { poolId: string; protocol: string }[],
+  targets: ActivityTarget[],
   sampleSize: number,
 ) => {
   const due = targets.filter((target) => !refreshing.has(target.poolId.toLowerCase()))
@@ -290,7 +290,7 @@ export const getPoolsSnapshot = async (): Promise<PoolsSnapshot> => {
     // Goes through the same cache-first path the route uses, so the eager pass and the browser
     // share measurements instead of each paying for its own.
     const measured = await loadActivityFor(
-      candidates.map(({ poolId, protocol }) => ({ poolId, protocol })),
+      candidates.map(({ poolId, protocol, chainId }) => ({ poolId, protocol, chainId })),
     )
     activity = new Map(Object.entries(measured))
   } catch {

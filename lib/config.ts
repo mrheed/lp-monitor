@@ -1,7 +1,4 @@
-/** Robinhood Chain, the Arbitrum Orbit L2 this tracker follows. */
-export const CHAIN_ID = 4663
-
-export const PROTOCOL = 'uniswapv4'
+import { chainById } from './chains'
 
 /**
  * How many pools get their transaction activity fetched before the page is served.
@@ -26,12 +23,15 @@ export const ACTIVITY_PARALLEL_BATCHES = 4
 /**
  * How many pools the background sweep measures, taken in server rank order.
  *
- * Set above the current pool count so the sweep covers everything: at 6 requests per second
- * the full set takes about seven minutes. It remains a fixed prefix of the rank order rather
- * than whatever happened to be scrolled to, so the cohort a score is computed against is
- * reproducible, and it caps the work if the chain's pool count grows sharply.
+ * Set above the current pool count so the sweep covers everything. Six chains return 4,759
+ * pools, of which 3,846 sit on protocols Uniswap's transaction feed indexes; the rest are
+ * skipped before any request. At 6 requests per second that is roughly eleven minutes.
+ *
+ * It remains a fixed prefix of the rank order rather than whatever happened to be scrolled to,
+ * so the cohort a score is computed against is reproducible, and it caps the work if the pool
+ * count grows sharply.
  */
-export const SWEEP_POOL_LIMIT = 3000
+export const SWEEP_POOL_LIMIT = 6000
 
 /**
  * How many times a pool is attempted before the sweep gives up on it.
@@ -61,17 +61,14 @@ export const SWEEP_IDLE_POLL_MS = 15_000
 export const ROW_PAGE_SIZE = 10
 
 /**
- * Uniswap's URL slug for this chain.
+ * Builds the Uniswap explore link for a pool.
  *
- * Verified by content, not status: app.uniswap.org returns 200 for every path, but the
- * `robinhood` slug returns a page containing the pool's token symbols while a nonsense slug
- * returns a shorter shell without them.
+ * The slug comes from the chain registry. Verified by content, not status: app.uniswap.org
+ * returns 200 for every path, but a correct slug returns a page containing the pool's token
+ * symbols while a nonsense slug returns a shorter shell without them.
  */
-export const UNISWAP_CHAIN_SLUG = 'robinhood'
-
-/** Builds the Uniswap explore link for a pool. */
-export const uniswapPoolUrl = (poolAddress: string) =>
-  `https://app.uniswap.org/explore/pools/${UNISWAP_CHAIN_SLUG}/${poolAddress}`
+export const uniswapPoolUrl = (chainId: number, poolAddress: string) =>
+  `https://app.uniswap.org/explore/pools/${chainById(chainId)?.slug ?? chainId}/${poolAddress}`
 
 /**
  * Transactions sampled per pool when measuring activity.

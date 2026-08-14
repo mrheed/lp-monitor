@@ -392,14 +392,18 @@ const withActivity = async (
   const unmeasured = remeasure ? pools : pools.filter((pool) => pool.txCount === null)
   if (unmeasured.length === 0) return pools
 
-  const protocolOf = new Map(rows.map((row) => [row.poolId.toLowerCase(), row.protocol]))
+  // Both the protocol and the chain come from the snapshot row, since a candidate carries
+  // neither and the transaction feed needs both to answer.
+  const sourceOf = new Map(
+    rows.map((row) => [row.poolId.toLowerCase(), { protocol: row.protocol, chainId: row.chainId }]),
+  )
 
   try {
     const measured = await loadActivityFor(
-      unmeasured.map((pool) => ({
-        poolId: pool.poolId,
-        protocol: protocolOf.get(pool.poolId.toLowerCase()) ?? '',
-      })),
+      unmeasured.flatMap((pool) => {
+        const source = sourceOf.get(pool.poolId.toLowerCase())
+        return source ? [{ poolId: pool.poolId, ...source }] : []
+      }),
       TX_SAMPLE_SIZE_WATCHED,
     )
 
@@ -539,7 +543,7 @@ export const previewChangeReport = async (): Promise<{
   // highest ranked pools, so a watched pool below that cut would preview as unmeasured and the
   // preview would not match the message it is meant to predict.
   const measured = await loadActivityFor(
-    watchedRows.map(({ poolId, protocol }) => ({ poolId, protocol })),
+    watchedRows.map(({ poolId, protocol, chainId }) => ({ poolId, protocol, chainId })),
     TX_SAMPLE_SIZE_WATCHED,
   ).catch(() => ({}) as Record<string, Activity>)
 

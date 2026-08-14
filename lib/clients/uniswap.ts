@@ -1,5 +1,6 @@
 import { z } from 'zod'
-import { CHAIN_ID, FETCH_CONCURRENCY, TX_SAMPLE_SIZE } from '../config'
+import { FETCH_CONCURRENCY, TX_SAMPLE_SIZE } from '../config'
+import { hasTransactionFeed } from '../chains'
 import { computeActivity, type ActivitySample } from '../domain/activity'
 import type { Activity } from '../types'
 
@@ -19,8 +20,8 @@ const listTransactionsSchema = z.object({
   transactions: z.array(transactionSchema).default([]),
 })
 
-/** A pool to measure, carrying the protocol its id belongs to. */
-export type ActivityTarget = { poolId: string; protocol: string }
+/** A pool to measure, carrying the chain and protocol its id belongs to. */
+export type ActivityTarget = { poolId: string; protocol: string; chainId: number }
 
 /**
  * Maps a Krystal protocol name to the Uniswap protocol version enum.
@@ -41,7 +42,7 @@ export const protocolVersionFor = (protocol: string) =>
  * twenty other pools. Filtering on the way out makes that failure mode impossible to inherit.
  */
 const fetchPoolTransactions = async (
-  { poolId, protocol }: ActivityTarget,
+  { poolId, protocol, chainId }: ActivityTarget,
   sampleSize: number,
 ): Promise<ActivitySample[]> => {
   const response = await fetch(ENDPOINT, {
@@ -55,7 +56,7 @@ const fetchPoolTransactions = async (
       'x-request-source': 'uniswap-web',
     },
     body: JSON.stringify({
-      chainIds: [CHAIN_ID],
+      chainIds: [chainId],
       filter: { protocolVersions: [protocolVersionFor(protocol)], poolId },
       page: { pageSize: sampleSize },
     }),
@@ -104,7 +105,12 @@ export const fetchActivity = async (
   targets: ActivityTarget[],
   sampleSize: number = TX_SAMPLE_SIZE,
 ): Promise<Map<string, Activity>> => {
-  const entries = await mapWithConcurrency(targets, FETCH_CONCURRENCY, async (target) => {
+  // Pools on protocols the feed does not index are dropped before any request. Asking about an
+  // Aerodrome pool returns an empty list rather than an error, so without this they would be
+  // retried on every sweep and never measured.
+  const askable = targets.filter((target) => hasTransactionFeed(target.protocol))
+
+  const entries = await mapWithConcurrency(askable, FETCH_CONCURRENCY, async (target) => {
     // One retry, because the gateway returns intermittent 5xx under a sustained sweep and a
     // single failure previously stranded that pool for the rest of the pass.
     for (let attempt = 0; attempt < 2; attempt += 1) {

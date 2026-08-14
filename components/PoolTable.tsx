@@ -20,6 +20,7 @@ import { rankByScore, scorePools } from '@/lib/domain/score'
 import { simulateFeeShare } from '@/lib/domain/simulate'
 import { HOURS, simulateCompounding, type CompoundOutcome } from '@/lib/domain/compound'
 import type { Activity, PoolRow, PositionState } from '@/lib/types'
+import { chainLabel, hasTransactionFeed } from '@/lib/chains'
 
 type SortKey =
   | 'score'
@@ -159,6 +160,28 @@ const span = (seconds: number) => {
  */
 const SAMPLED_TITLE =
   'Counted from the most recent transactions Uniswap returned, over the span shown beneath. Not reported by the pool feed.'
+
+/**
+ * A sampled cell, or the reason it is empty.
+ *
+ * Three states rather than two: measured, not measured yet, and never measurable because
+ * Uniswap's transaction feed does not index this pool's protocol. Showing the last as a dash
+ * would leave the reader waiting for a number that is never coming.
+ */
+const sampledCell = (row: PoolRow, render: (activity: Activity) => ReactNode): ReactNode => {
+  if (!hasTransactionFeed(row.protocol)) {
+    return (
+      <span
+        className="text-ink-ghost"
+        title={`Uniswap's transaction feed does not cover ${row.protocol}, so trades cannot be counted for this pool`}
+      >
+        n/a
+      </span>
+    )
+  }
+
+  return row.activity ? render(row.activity) : missing
+}
 
 const SampledHeader = ({ children }: { children: ReactNode }) => (
   <span title={SAMPLED_TITLE}>
@@ -599,6 +622,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
   const [minTvl, setMinTvl] = useState(0)
   const [onlyMine, setOnlyMine] = useState(false)
   const [protocol, setProtocol] = useState('all')
+  const [chain, setChain] = useState('all')
   const [sortKey, setSortKey] = useState<SortKey>('score')
 
   const sentinel = useRef<HTMLDivElement | null>(null)
@@ -741,6 +765,16 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
     [serverRows],
   )
 
+  // Built from the rows rather than the registry, so a chain with no pools never appears as an
+  // option that filters everything away.
+  const chains = useMemo(
+    () =>
+      [...new Set(serverRows.map((row) => row.chainId))]
+        .map((id) => ({ id, label: chainLabel(id) }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [serverRows],
+  )
+
   // Server measured rows and lazily measured rows are merged, then rescored together so every
   // score on screen is drawn from the same cohort.
   const rows = useMemo(() => {
@@ -792,6 +826,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
       if (row.tvlUsd < minTvl) return false
       if (onlyMine && row.position === 'none') return false
       if (protocol !== 'all' && row.protocol !== protocol) return false
+      if (chain !== 'all' && String(row.chainId) !== chain) return false
       if (
         needle &&
         !row.pair.toLowerCase().includes(needle) &&
@@ -805,7 +840,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
     return [...filtered].sort(
       (a, b) => sortValue(b, sortKey, projection) - sortValue(a, sortKey, projection),
     )
-  }, [rows, query, minTvl, onlyMine, protocol, sortKey, projection])
+  }, [rows, query, minTvl, onlyMine, protocol, chain, sortKey, projection])
 
   const onScreen = visible.slice(0, visibleCount)
 
@@ -832,9 +867,10 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
 
   /** Requests activity for one batch of pools. */
   const fetchBatch = useCallback(async (batch: PoolRow[]) => {
-    const targets = batch.map(({ poolId, protocol: poolProtocol }) => ({
+    const targets = batch.map(({ poolId, protocol: poolProtocol, chainId }) => ({
       poolId,
       protocol: poolProtocol,
+      chainId,
     }))
 
     try {
@@ -884,6 +920,10 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
         // against the same cohort regardless of scrolling.
         const now = Date.now()
         const pending = rowsRef.current.slice(0, SWEEP_POOL_LIMIT).filter((row) => {
+          // Uniswap's transaction feed indexes only their own v3 and v4 pools. An Aerodrome or
+          // PancakeSwap pool answers with an empty list rather than an error, so sweeping it
+          // would retry forever and never measure anything.
+          if (!hasTransactionFeed(row.protocol)) return false
           if (requested.current.has(row.poolId)) return false
           if (row.activity === null) return true
 
@@ -954,7 +994,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
   // A changed filter should start from the top rather than keep a deep scroll position.
   useEffect(() => {
     setVisibleCount(ROW_PAGE_SIZE)
-  }, [query, minTvl, onlyMine, protocol, sortKey])
+  }, [query, minTvl, onlyMine, protocol, chain, sortKey])
 
   // Focus is a visible ring, not just a border tint: a one-step border shift is invisible to a
   // keyboard user moving through seven controls.
@@ -985,6 +1025,16 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
           <option value={100_000}>TVL over $100k</option>
           <option value={1_000_000}>TVL over $1M</option>
         </select>
+        {chains.length < 2 ? null : (
+          <select value={chain} onChange={(e) => setChain(e.target.value)} className={control}>
+            <option value="all">All chains</option>
+            {chains.map((option) => (
+              <option key={option.id} value={String(option.id)}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        )}
         <select value={protocol} onChange={(e) => setProtocol(e.target.value)} className={control}>
           <option value="all">All protocols</option>
           {protocols.map((name) => (
@@ -1270,6 +1320,9 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
                   </td>
                   <td className={CELL}>
                     <div className="font-medium text-ink">{row.pair}</div>
+                    <div className={`${SUB} normal-case tracking-normal`}>
+                      {chainLabel(row.chainId)} · {row.protocol}
+                    </div>
                     <div className={`${SUB} font-mono normal-case tracking-normal`}>
                       {row.poolId.slice(0, 10)}…{row.poolId.slice(-6)}
                     </div>
@@ -1321,27 +1374,23 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
                   </td>
 
                   <td className={`${AT_LG} ${CELL_EDGE} text-right tabular-nums text-ink-muted`}>
-                    {row.activity ? (
+                    {sampledCell(row, (activity) => (
                       <>
-                        {row.activity.sampleSize}
-                        <div className={SUB}>in {span(row.activity.windowSeconds)}</div>
+                        {activity.sampleSize}
+                        <div className={SUB}>in {span(activity.windowSeconds)}</div>
                       </>
-                    ) : (
-                      missing
-                    )}
+                    ))}
                   </td>
                   <td className={`${AT_2XL} ${CELL} text-right tabular-nums text-ink-muted`}>
-                    {row.activity ? (
+                    {sampledCell(row, (activity) => (
                       <>
-                        {usd(row.activity.volumeUsd)}
-                        <div className={SUB}>in {span(row.activity.windowSeconds)}</div>
+                        {usd(activity.volumeUsd)}
+                        <div className={SUB}>in {span(activity.windowSeconds)}</div>
                       </>
-                    ) : (
-                      missing
-                    )}
+                    ))}
                   </td>
                   <td className={`${AT_XL} ${CELL} text-right tabular-nums text-ink0`}>
-                    {row.activity ? row.activity.uniqueTraders : missing}
+                    {sampledCell(row, (activity) => activity.uniqueTraders)}
                   </td>
 
                   <td
