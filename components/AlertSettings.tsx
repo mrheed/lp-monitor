@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react'
 import type { AlertStatus } from '@/lib/domain/alertWatcher'
 import { DEFAULT_FILTERS, type AlertFilters } from '@/lib/domain/newPools'
+import { count } from '@/lib/format'
 
 const CONTROL =
   'rounded border border-line bg-surface px-2.5 py-2 outline-none focus-visible:border-line-strong focus-visible:ring-1 focus-visible:ring-accent sm:py-1'
@@ -123,7 +124,7 @@ export const AlertSettings = ({
             : unavailable
               ? 'Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env.local. The token stays on the server.'
               : filters.enabled
-                ? `Announcing pools that appear from now on, ${status.knownPools.toLocaleString()} so far.`
+                ? `Announcing pools that appear from now on, ${count(status.knownPools)} so far.`
                 : 'Off. The queue still builds, so switching on sends what appeared meanwhile.'
         }
       >
@@ -185,7 +186,7 @@ export const AlertSettings = ({
         note={
           watching === 0
             ? 'Nothing watched. Tick a row in the Watch column to follow its fees, trades and volume.'
-            : `Comparing ${watching.toLocaleString()} pool${watching === 1 ? '' : 's'} every minute, sent only when one moves past the threshold.${
+            : `Comparing ${count(watching)} pool${watching === 1 ? '' : 's'} every minute, sent only when one moves past the threshold.${
                 status?.lastReportAt
                   ? ` Last change ${new Date(status.lastReportAt).toLocaleTimeString()}.`
                   : ''
@@ -252,6 +253,11 @@ const AlertHistory = ({ records }: { records: AlertStatus['history'] }) => {
         {records.map((entry) => (
           <li key={`${entry.at}-${entry.status}`} className="flex flex-wrap items-baseline gap-x-2">
             <span className="tabular-nums text-ink-ghost">
+              {/*
+                Runtime locale is fine here, and wanted: history only renders after the status
+                fetch completes on the client, so this text never hydrates, and a timestamp
+                should read in the operator's own timezone and format.
+              */}
               {new Date(entry.at).toLocaleString()}
             </span>
             <span

@@ -22,6 +22,7 @@ import { simulateFeeShare } from '@/lib/domain/simulate'
 import { HOURS, simulateCompounding, type CompoundOutcome } from '@/lib/domain/compound'
 import type { Activity, PoolRow, PositionState } from '@/lib/types'
 import { chainLabel, hasTransactionFeed } from '@/lib/chains'
+import { count } from '@/lib/format'
 import { sweepTargets, sweepTargetCount } from '@/lib/domain/sweep'
 
 type SortKey =
@@ -430,16 +431,16 @@ const SweepProgress = ({
   if (done) {
     return (
       <div className="text-xs text-ink-ghost">
-        {measured.toLocaleString()} of {total.toLocaleString()} pools scored
+        {count(measured)} of {count(total)} pools scored
         {notIndexed > 0
-          ? `, ${notIndexed.toLocaleString()} on protocols Uniswap does not index`
+          ? `, ${count(notIndexed)} on protocols Uniswap does not index`
           : null}
         {unmeasurable > 0
-          ? `, ${unmeasurable.toLocaleString()} unavailable upstream after ${SWEEP_MAX_ATTEMPTS} attempts`
+          ? `, ${count(unmeasurable)} unavailable upstream after ${SWEEP_MAX_ATTEMPTS} attempts`
           : null}
         .{' '}
         {due > 0
-          ? `Re-measuring ${due.toLocaleString()} that aged past ${Math.round(ACTIVITY_MAX_AGE_MS / 60_000)} minutes.`
+          ? `Re-measuring ${count(due)} that aged past ${Math.round(ACTIVITY_MAX_AGE_MS / 60_000)} minutes.`
           : `Measurements are re-taken as they pass ${Math.round(ACTIVITY_MAX_AGE_MS / 60_000)} minutes old.`}
       </div>
     )
@@ -449,9 +450,9 @@ const SweepProgress = ({
     <div className="space-y-1.5">
       <div className="flex items-baseline justify-between text-xs">
         <span className="text-ink-muted">
-          Measuring pools: {measured.toLocaleString()} of {target.toLocaleString()}
-          {notIndexed > 0 ? `, ${notIndexed.toLocaleString()} not indexed` : null}
-          {unmeasurable > 0 ? `, ${unmeasurable.toLocaleString()} unavailable` : null}
+          Measuring pools: {count(measured)} of {count(target)}
+          {notIndexed > 0 ? `, ${count(notIndexed)} not indexed` : null}
+          {unmeasurable > 0 ? `, ${count(unmeasurable)} unavailable` : null}
         </span>
         <span className="tabular-nums text-ink-ghost">{percent}%</span>
       </div>
@@ -1215,11 +1216,11 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
           <li className="rounded border border-line px-4 py-10 text-center">
             <p className="text-sm text-ink-muted">No pools match these filters.</p>
             <p className="mx-auto mt-2 max-w-xs text-xs leading-relaxed text-ink-ghost">
-              {rows.length.toLocaleString()} pools are loaded.{' '}
+              {count(rows.length)} pools are loaded.{' '}
               {onlyMine
                 ? 'Only pools you have held are shown; clear that to widen the search.'
                 : minTvl > 0
-                  ? `The TVL floor of $${minTvl.toLocaleString()} may be excluding them.`
+                  ? `The TVL floor of $${count(minTvl)} may be excluding them.`
                   : 'Try a shorter search term, or a different protocol.'}
             </p>
           </li>
@@ -1241,7 +1242,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
                 Earnings
               </th>
               <th className={`${GROUP_EDGE} pb-1 pt-3 text-right font-medium`} colSpan={5}>
-                Capital, at ${depositUsd.toLocaleString()}
+                Capital, at ${count(depositUsd)}
               </th>
               <th className={`${GROUP_EDGE} pb-1 pt-3 text-right font-medium`} colSpan={3}>
                 Activity
@@ -1286,11 +1287,11 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
                 <td colSpan={TABLE_COLUMNS} className="px-5 py-14 text-center">
                   <p className="text-sm text-ink-muted">No pools match these filters.</p>
                   <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-ink-ghost">
-                    {rows.length.toLocaleString()} pools are loaded.{' '}
+                    {count(rows.length)} pools are loaded.{' '}
                     {onlyMine
                       ? 'Only pools you have held are shown; clear that to widen the search.'
                       : minTvl > 0
-                        ? `The TVL floor of $${minTvl.toLocaleString()} may be excluding them.`
+                        ? `The TVL floor of $${count(minTvl)} may be excluding them.`
                         : 'Try a shorter search term, or a different protocol.'}
                   </p>
                 </td>
@@ -1373,7 +1374,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
                   </td>
                   <td
                     className={`${AT_2XL} ${CELL} text-right tabular-nums text-ink0`}
-                    title={`A $${depositUsd.toLocaleString()} deposit would be ${(sim.share * 100).toFixed(1)}% of the pool once added to it`}
+                    title={`A $${count(depositUsd)} deposit would be ${(sim.share * 100).toFixed(1)}% of the pool once added to it`}
                   >
                     {(sim.share * 100).toFixed(sim.share < 0.01 ? 2 : 1)}%
                   </td>
