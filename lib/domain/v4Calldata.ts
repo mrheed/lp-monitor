@@ -9,7 +9,7 @@ import { encodeAbiParameters, encodeFunctionData, getAddress, parseAbi } from 'v
  */
 export const ACTIONS = {
   INCREASE_LIQUIDITY: 0x00,
-  SETTLE_PAIR: 0x0d,
+  CLOSE_CURRENCY: 0x12,
   SWEEP: 0x14,
 } as const
 
@@ -48,10 +48,17 @@ export type IncreaseCall = {
 /**
  * Builds the `modifyLiquidities` calldata that adds liquidity to an existing v4 position.
  *
- * The unlock plan is INCREASE_LIQUIDITY, SETTLE_PAIR, then SWEEP when a side is native. The
- * increase creates a debt to the pool, the settle pays it in both currencies, and the sweep
- * returns whatever the native maximum overshot by; ERC20 sides are pulled exactly and need no
- * refund, which is why the sweep is omitted for token-token pools.
+ * The unlock plan is INCREASE_LIQUIDITY, CLOSE_CURRENCY for each side, then SWEEP when a side
+ * is native. The increase creates a debt to the pool and each close resolves its currency
+ * whatever the sign: it settles a debt, takes a credit, and does nothing at zero.
+ *
+ * CLOSE_CURRENCY rather than SETTLE_PAIR, learned from a live revert: SETTLE_PAIR demands a
+ * debt in both currencies, and a position out of range owes exactly one, so the pool answered
+ * DeltaNotNegative(0x0) for the side that owed nothing. Close covers every regime, including a
+ * price that drifts across the range boundary between planning and execution.
+ *
+ * The sweep returns whatever the native maximum overshot by; ERC20 sides are pulled exactly and
+ * need no refund, which is why the sweep is omitted for token-token pools.
  *
  * Hook data is empty. Pools with hooks still take this shape; a hook that requires custom data
  * on modify is out of scope and will revert in simulation rather than on chain.
@@ -72,13 +79,15 @@ export const buildIncreaseCalldata = (call: IncreaseCall): `0x${string}` => {
     [call.tokenId, call.liquidityDelta, call.amount0Max, call.amount1Max, '0x'],
   )
 
-  const settleParams = encodeAbiParameters(
-    [{ type: 'address' }, { type: 'address' }],
-    [currency0, currency1],
-  )
+  const closeParams = (currency: `0x${string}`) =>
+    encodeAbiParameters([{ type: 'address' }], [currency])
 
-  const actions: number[] = [ACTIONS.INCREASE_LIQUIDITY, ACTIONS.SETTLE_PAIR]
-  const params: `0x${string}`[] = [increaseParams, settleParams]
+  const actions: number[] = [
+    ACTIONS.INCREASE_LIQUIDITY,
+    ACTIONS.CLOSE_CURRENCY,
+    ACTIONS.CLOSE_CURRENCY,
+  ]
+  const params: `0x${string}`[] = [increaseParams, closeParams(currency0), closeParams(currency1)]
 
   if (hasNative) {
     actions.push(ACTIONS.SWEEP)

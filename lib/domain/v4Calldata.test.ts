@@ -35,14 +35,15 @@ describe('the v4 increase calldata', () => {
     expect(deadline).toBe(1_755_300_000n)
   })
 
-  it('encodes increase, settle pair, then sweep, in that order', () => {
-    // Order is the contract's protocol: the increase creates the debt, SETTLE_PAIR pays it in
-    // both currencies, and SWEEP refunds whatever native currency the maximum overshot by.
-    // Constants verified against v4-periphery Actions.sol, not recalled.
+  it('encodes increase, a close per currency, then sweep, in that order', () => {
+    // CLOSE_CURRENCY rather than SETTLE_PAIR, learned from a live revert: SETTLE_PAIR requires
+    // a debt in both currencies, and an out-of-range add owes exactly one. The pool answered
+    // DeltaNotNegative(0x0) for the side that owed nothing. CLOSE settles a debt, takes a
+    // credit, and does nothing on zero, which covers every regime a position can be in.
     const { actions } = decode(buildIncreaseCalldata(input))
 
     expect(actions).toBe(
-      `0x${[ACTIONS.INCREASE_LIQUIDITY, ACTIONS.SETTLE_PAIR, ACTIONS.SWEEP]
+      `0x${[ACTIONS.INCREASE_LIQUIDITY, ACTIONS.CLOSE_CURRENCY, ACTIONS.CLOSE_CURRENCY, ACTIONS.SWEEP]
         .map((a) => a.toString(16).padStart(2, '0'))
         .join('')}`,
     )
@@ -68,14 +69,12 @@ describe('the v4 increase calldata', () => {
     expect(hookData).toBe('0x')
   })
 
-  it('settles the pair in v4 currency form, where native is the zero address', () => {
+  it('closes each currency in v4 form, where native is the zero address', () => {
     // Krystal reports native as 0xeee…e; the v4 PoolManager identifies it as address(0). Sending
     // the 0xeee form would name a currency the pool does not contain and revert.
     const { params } = decode(buildIncreaseCalldata(input))
-    const [currency0, currency1] = decodeAbiParameters(
-      [{ type: 'address' }, { type: 'address' }],
-      params[1],
-    )
+    const [currency0] = decodeAbiParameters([{ type: 'address' }], params[1])
+    const [currency1] = decodeAbiParameters([{ type: 'address' }], params[2])
 
     expect(currency0).toBe(NATIVE)
     expect(currency1.toLowerCase()).toBe(input.currency1)
@@ -85,7 +84,7 @@ describe('the v4 increase calldata', () => {
     const { params } = decode(buildIncreaseCalldata(input))
     const [currency, to] = decodeAbiParameters(
       [{ type: 'address' }, { type: 'address' }],
-      params[2],
+      params[3],
     )
 
     expect(currency).toBe(NATIVE)
@@ -101,11 +100,11 @@ describe('the v4 increase calldata', () => {
     )
 
     expect(actions).toBe(
-      `0x${[ACTIONS.INCREASE_LIQUIDITY, ACTIONS.SETTLE_PAIR]
+      `0x${[ACTIONS.INCREASE_LIQUIDITY, ACTIONS.CLOSE_CURRENCY, ACTIONS.CLOSE_CURRENCY]
         .map((a) => a.toString(16).padStart(2, '0'))
         .join('')}`,
     )
-    expect(params).toHaveLength(2)
+    expect(params).toHaveLength(3)
   })
 })
 

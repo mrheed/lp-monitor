@@ -39,20 +39,33 @@ describe('planning an increase', () => {
     expect(plan.maxAmounts[1].rawAmount).toBe(exact.amount1)
   })
 
-  it('pads the maximums by the slippage allowance', () => {
+  it('pads by moving the price, so both maximums cover the whole tolerance band', () => {
+    // Amounts move in opposite directions with price, so each side is evaluated at the band
+    // edge that costs it most: token0 at the low edge, token1 at the high edge.
     const tight = planIncrease(position(), { depositUsd: 227.38, slippagePercent: 0 }, inRange)
     const padded = planIncrease(position(), { depositUsd: 227.38, slippagePercent: 1 }, inRange)
 
-    expect(padded.maxAmounts[0].rawAmount).toBe((tight.maxAmounts[0].rawAmount * 10_100n) / 10_000n)
+    expect(padded.maxAmounts[0].rawAmount > tight.maxAmounts[0].rawAmount).toBe(true)
+    expect(padded.maxAmounts[1].rawAmount > tight.maxAmounts[1].rawAmount).toBe(true)
   })
 
-  it('needs only one token when the price sits outside the range', () => {
-    // Above the range the position is entirely token1; the token0 maximum must be exactly zero
-    // so SETTLE_PAIR never tries to pull a token the position does not need.
+  it('needs only one token when the price sits far outside the range', () => {
     const above: PoolState = { ...inRange, sqrtPriceX96: sqrtPriceAtTick(1_200) }
     const plan = planIncrease(position(), { depositUsd: 227.38, slippagePercent: 1 }, above)
 
     expect(plan.maxAmounts[0].rawAmount).toBe(0n)
+    expect(plan.maxAmounts[1].rawAmount > 0n).toBe(true)
+  })
+
+  it('keeps a little of the other token in reach just outside the range boundary', () => {
+    // The failure this encodes: a live position sat four ticks above its range, the plan said
+    // token0 zero, the price flickered back inside, and the pool's demand for a little token0
+    // met a hard zero. Within the slippage band of the boundary, the zero side must be small
+    // but not zero, so a crossing changes what is paid rather than reverting.
+    const justAbove: PoolState = { ...inRange, sqrtPriceX96: sqrtPriceAtTick(601) }
+    const plan = planIncrease(position(), { depositUsd: 227.38, slippagePercent: 1 }, justAbove)
+
+    expect(plan.maxAmounts[0].rawAmount > 0n).toBe(true)
     expect(plan.maxAmounts[1].rawAmount > 0n).toBe(true)
   })
 

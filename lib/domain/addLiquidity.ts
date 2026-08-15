@@ -73,7 +73,6 @@ export const planIncrease = (
 
   const ratio = request.depositUsd / position.valueUsd
   const scaledRatio = BigInt(Math.floor(ratio * Number(SCALE)))
-  const slippage = BigInt(Math.round(request.slippagePercent * 100))
 
   // The delta still comes from the value ratio, which is stable: position value scales linearly
   // with liquidity, so a USD share translates to the same share of liquidity.
@@ -84,17 +83,24 @@ export const planIncrease = (
   // end within a fraction of a percent of price movement, so by the time a snapshot arrives it
   // describes a composition the pool no longer has. The pool's own math against its current
   // price is the only version the contract will agree with.
-  const { amount0, amount1 } = amountsForLiquidity(
-    state.sqrtPriceX96,
-    state.tickLower,
-    state.tickUpper,
-    liquidityDelta,
-  )
+  //
+  // Slippage pads the PRICE, not the amounts. Padding amounts multiplicatively keeps a zero at
+  // zero, and a live position sat four ticks above its range when this was written: the plan
+  // said no token0 at all, the price flickered into range, and the pool's demand for a little
+  // token0 met a hard zero maximum. Evaluating token0 at the price band's lower edge and token1
+  // at its upper edge is the most either can require anywhere inside the tolerance, so a
+  // boundary crossing inside the band changes what is paid, not whether it reverts.
+  const bandFactor = (direction: -1 | 1) =>
+    BigInt(Math.round(Math.sqrt(1 + (direction * request.slippagePercent) / 100) * 1_000_000_000))
+  const sqrtLow = (state.sqrtPriceX96 * bandFactor(-1)) / 1_000_000_000n
+  const sqrtHigh = (state.sqrtPriceX96 * bandFactor(1)) / 1_000_000_000n
 
-  const pad = (amount: bigint) => (amount * (10_000n + slippage)) / 10_000n
+  const atLow = amountsForLiquidity(sqrtLow, state.tickLower, state.tickUpper, liquidityDelta)
+  const atHigh = amountsForLiquidity(sqrtHigh, state.tickLower, state.tickUpper, liquidityDelta)
+
   const maxAmounts = [
-    { address: position.amounts[0].address, rawAmount: pad(amount0) },
-    { address: position.amounts[1].address, rawAmount: pad(amount1) },
+    { address: position.amounts[0].address, rawAmount: atLow.amount0 },
+    { address: position.amounts[1].address, rawAmount: atHigh.amount1 },
   ]
 
   return { liquidityDelta, maxAmounts, ratio }
