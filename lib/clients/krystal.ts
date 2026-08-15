@@ -271,6 +271,23 @@ const fetchAllVaultPositions = async (wallet: string): Promise<VaultPool[]> => {
   return perVault.flat()
 }
 
+const tokenAmountsSchema = z
+  .array(
+    z.object({
+      token: z.object({
+        address: z.string().default(''),
+        symbol: z.string().default(''),
+        decimals: z.number().default(18),
+      }),
+      balance: z.string().default('0'),
+      quotes: z
+        .object({ usd: z.object({ value: z.number().default(0) }).partial() })
+        .partial()
+        .default({}),
+    }),
+  )
+  .default([])
+
 const addablePositionSchema = z.object({
   tokenId: z.string().default(''),
   /** The position manager contract that minted this position's NFT. */
@@ -281,22 +298,9 @@ const addablePositionSchema = z.object({
   currentPositionValue: z.number().default(0),
   minPrice: z.number().default(0),
   maxPrice: z.number().default(0),
-  currentAmounts: z
-    .array(
-      z.object({
-        token: z.object({
-          address: z.string().default(''),
-          symbol: z.string().default(''),
-          decimals: z.number().default(18),
-        }),
-        balance: z.string().default('0'),
-        quotes: z
-          .object({ usd: z.object({ value: z.number().default(0) }).partial() })
-          .partial()
-          .default({}),
-      }),
-    )
-    .default([]),
+  currentAmounts: tokenAmountsSchema,
+  /** Fees earned but not yet collected. An increase collects them as a side effect. */
+  feePending: tokenAmountsSchema,
   pool: z.object({
     id: z.string().default(''),
     hooks: z.string().default(''),

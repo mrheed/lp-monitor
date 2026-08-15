@@ -29,6 +29,11 @@ type AddablePosition = {
     balance: string
     quotes: { usd?: { value?: number } }
   }[]
+  feePending: {
+    token: { address: string; symbol: string; decimals: number }
+    balance: string
+    quotes: { usd?: { value?: number } }
+  }[]
   pool: { id: string; hooks: string }
 }
 
@@ -328,6 +333,32 @@ export const AddLiquidity = ({ row, onClose }: { row: PoolRow; onClose: () => vo
                     </li>
                   ))}
                 </ul>
+                {position.feePending.some((fee) => BigInt(fee.balance) > 0n) ? (
+                  <p className="mt-1.5 text-xs text-ink-muted">
+                    {/*
+                      Said here because the wallet's preview shows the net of both effects, and
+                      collecting $4 of fees while adding $1 reads as five dollars inserted until
+                      someone explains it.
+                    */}
+                    Also collects your pending fees:{' '}
+                    {position.feePending
+                      .filter((fee) => BigInt(fee.balance) > 0n)
+                      .map(
+                        (fee) =>
+                          `${tokenAmount(BigInt(fee.balance), fee.token.decimals)} ${fee.token.symbol}`,
+                      )
+                      .join(' + ')}{' '}
+                    (~
+                    {usd(
+                      position.feePending.reduce(
+                        (total, fee) => total + (fee.quotes.usd?.value ?? 0),
+                        0,
+                      ),
+                    )}
+                    ) paid to your wallet in the same transaction. Modifying a v4 position always
+                    settles its earned fees.
+                  </p>
+                ) : null}
                 <p className="mt-1.5 text-xs text-ink-ghost">
                   Unused native currency is refunded in the same transaction. The exact call is
                   simulated first and never sent if the simulation reverts.
