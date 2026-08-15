@@ -21,6 +21,7 @@ import { simulateFeeShare } from '@/lib/domain/simulate'
 import { HOURS, simulateCompounding, type CompoundOutcome } from '@/lib/domain/compound'
 import type { Activity, PoolRow, PositionState } from '@/lib/types'
 import { chainLabel, hasTransactionFeed } from '@/lib/chains'
+import { sweepTargets, sweepTargetCount } from '@/lib/domain/sweep'
 
 type SortKey =
   | 'score'
@@ -407,12 +408,15 @@ const SweepProgress = ({
   due,
   target,
   total,
+  notIndexed,
 }: {
   measured: number
   unmeasurable: number
   due: number
   target: number
   total: number
+  /** Pools on protocols Uniswap's feed does not index, which the sweep never attempts. */
+  notIndexed: number
 }) => {
   if (target === 0) return null
 
@@ -426,6 +430,9 @@ const SweepProgress = ({
     return (
       <div className="text-xs text-ink-ghost">
         {measured.toLocaleString()} of {total.toLocaleString()} pools scored
+        {notIndexed > 0
+          ? `, ${notIndexed.toLocaleString()} on protocols Uniswap does not index`
+          : null}
         {unmeasurable > 0
           ? `, ${unmeasurable.toLocaleString()} unavailable upstream after ${SWEEP_MAX_ATTEMPTS} attempts`
           : null}
@@ -442,6 +449,7 @@ const SweepProgress = ({
       <div className="flex items-baseline justify-between text-xs">
         <span className="text-ink-muted">
           Measuring pools: {measured.toLocaleString()} of {target.toLocaleString()}
+          {notIndexed > 0 ? `, ${notIndexed.toLocaleString()} not indexed` : null}
           {unmeasurable > 0 ? `, ${unmeasurable.toLocaleString()} unavailable` : null}
         </span>
         <span className="tabular-nums text-ink-ghost">{percent}%</span>
@@ -807,7 +815,9 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
     [rows],
   )
 
-  const sweepTarget = Math.min(SWEEP_POOL_LIMIT, rows.length)
+  // Counts only what the sweep will attempt. Including pools it skips left the bar short of its
+  // target forever, which reads as a stall rather than as completion.
+  const sweepTarget = useMemo(() => sweepTargetCount(rows, SWEEP_POOL_LIMIT), [rows])
 
   // How many measurements have aged out and are queued to be taken again. Shown because the
   // re-sweep is a rolling window: pools fall due at the rate they were first measured, so only
@@ -919,11 +929,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
         // Only the fixed prefix of the rank order is measured, so every score is computed
         // against the same cohort regardless of scrolling.
         const now = Date.now()
-        const pending = rowsRef.current.slice(0, SWEEP_POOL_LIMIT).filter((row) => {
-          // Uniswap's transaction feed indexes only their own v3 and v4 pools. An Aerodrome or
-          // PancakeSwap pool answers with an empty list rather than an error, so sweeping it
-          // would retry forever and never measure anything.
-          if (!hasTransactionFeed(row.protocol)) return false
+        const pending = sweepTargets(rowsRef.current, SWEEP_POOL_LIMIT).filter((row) => {
           if (requested.current.has(row.poolId)) return false
           if (row.activity === null) return true
 
@@ -1177,6 +1183,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
 
       <SweepProgress
         measured={measuredCount}
+        notIndexed={rows.length - sweepTarget}
         unmeasurable={unmeasurable}
         due={dueForRemeasure}
         target={sweepTarget}

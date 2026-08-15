@@ -64,12 +64,19 @@ describe('which pools have trade data', () => {
     expect(hasTransactionFeed('uniswapv4')).toBe(true)
   })
 
+  it('accepts v2, which the feed does serve', () => {
+    // Excluded at first on the assumption the feed covered only concentrated liquidity, which
+    // wrote off 360 pools across Ethereum, Base and Robinhood. Asking with PROTOCOL_VERSION_V2
+    // returns their trades normally.
+    expect(hasTransactionFeed('uniswapv2')).toBe(true)
+  })
+
   it('rejects protocols the feed returns nothing for', () => {
-    // Verified against Base: Aerodrome and v2 pools return an empty transaction list rather than
-    // an error, so without this they would be swept forever and never measured.
+    // Verified against Base: Aerodrome and PancakeSwap pools return an empty transaction list
+    // rather than an error, so without this they would be swept forever and never measured.
     expect(hasTransactionFeed('aerodromecl')).toBe(false)
     expect(hasTransactionFeed('aerodromecl3')).toBe(false)
     expect(hasTransactionFeed('pancakev3')).toBe(false)
-    expect(hasTransactionFeed('uniswapv2')).toBe(false)
+    expect(hasTransactionFeed('sushiv3')).toBe(false)
   })
 })

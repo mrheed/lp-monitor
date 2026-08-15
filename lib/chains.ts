@@ -52,12 +52,17 @@ export const enabledChains = (): Chain[] => {
 /**
  * Whether Uniswap's transaction feed carries trades for a protocol.
  *
- * The feed is Uniswap's own and indexes only their v3 and v4 pools. Krystal's pool list is far
- * broader: Base alone returns Aerodrome, PancakeSwap and Uniswap v2 pools, and asking the
- * transaction endpoint about any of them returns an empty list rather than an error. Checking
- * first turns a silent blank into a pool that is simply never asked about.
+ * The feed is Uniswap's own and indexes their v2, v3 and v4 pools. Krystal's pool list is far
+ * broader: Base alone returns Aerodrome and PancakeSwap pools, and asking the transaction
+ * endpoint about any of them returns an empty list rather than an error. Checking first turns a
+ * silent blank into a pool that is simply never asked about.
+ *
+ * v2 is included on evidence: it was excluded at first on the assumption the feed covered only
+ * concentrated liquidity, which wrote off 360 pools. Asking with PROTOCOL_VERSION_V2 returns
+ * their trades normally.
  */
 export const hasTransactionFeed = (protocol: string): boolean => {
   const name = protocol.toLowerCase()
-  return name.startsWith('uniswap') && (name.includes('v3') || name.includes('v4'))
+  if (!name.startsWith('uniswap')) return false
+  return name.includes('v2') || name.includes('v3') || name.includes('v4')
 }

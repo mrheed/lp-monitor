@@ -26,12 +26,17 @@ export type ActivityTarget = { poolId: string; protocol: string; chainId: number
 /**
  * Maps a Krystal protocol name to the Uniswap protocol version enum.
  *
- * The pool feed mixes v3 and v4 despite the protocol query param, and the two use different
- * id shapes: v3 pools are 20 byte contract addresses, v4 pools are 32 byte pool ids. Asking
- * for the wrong version returns transactions that never match the requested id.
+ * The pool feed mixes versions regardless of the protocol query param, and they use different
+ * id shapes: v2 and v3 pools are 20 byte contract addresses, v4 pools are 32 byte pool ids.
+ * Asking for the wrong version returns transactions that never match the requested id, which
+ * looks exactly like a pool nobody trades.
  */
-export const protocolVersionFor = (protocol: string) =>
-  protocol.toLowerCase().includes('v3') ? 'PROTOCOL_VERSION_V3' : 'PROTOCOL_VERSION_V4'
+export const protocolVersionFor = (protocol: string) => {
+  const name = protocol.toLowerCase()
+  if (name.includes('v2')) return 'PROTOCOL_VERSION_V2'
+  if (name.includes('v3')) return 'PROTOCOL_VERSION_V3'
+  return 'PROTOCOL_VERSION_V4'
+}
 
 /**
  * Fetches one page of transactions for a single pool.
