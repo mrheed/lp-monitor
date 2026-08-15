@@ -14,6 +14,7 @@ import {
   SWEEP_RETRY_BACKOFF_MS,
 } from '@/lib/config'
 import { AlertSettings } from './AlertSettings'
+import { AddLiquidity } from './AddLiquidity'
 import type { AlertStatus } from '@/lib/domain/alertWatcher'
 import { DEFAULT_FILTERS, type AlertFilters } from '@/lib/domain/newPools'
 import { rankByScore, scorePools } from '@/lib/domain/score'
@@ -618,6 +619,8 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
   // Alerts are watched and sent by the server, so the browser holds no known-pool state and
   // closing the tab does not stop them. This is a view of the watcher plus a way to steer it.
   const [alertStatus, setAlertStatus] = useState<AlertStatus | null>(null)
+  /** The pool an add-liquidity dialog is open for, or null. */
+  const [addingTo, setAddingTo] = useState<PoolRow | null>(null)
   const alertStatusRef = useRef<AlertStatus | null>(null)
   alertStatusRef.current = alertStatus
 
@@ -1013,6 +1016,9 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
 
   return (
     <div className="space-y-5">
+      {addingTo === null ? null : (
+        <AddLiquidity row={addingTo} onClose={() => setAddingTo(null)} />
+      )}
       {/*
         Controls cluster by job rather than sitting in one undifferentiated row: narrowing the
         set, then the deposit the projection is built on, then status and refresh. The dividers
@@ -1324,6 +1330,21 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
                       holders={row.positionHolders}
                       multipleWalletsTracked={walletCount > 1}
                     />
+                    {/*
+                      Only where an open direct position exists: a closed one cannot be
+                      increased, and a vault's liquidity belongs to the vault contract rather
+                      than the wallet that would be signing.
+                    */}
+                    {row.position === 'open' && row.positionVia === 'direct' ? (
+                      <button
+                        type="button"
+                        onClick={() => setAddingTo(row)}
+                        className="mt-1 block rounded border border-line px-1.5 py-0.5 text-[11px] text-ink-muted transition-colors hover:border-accent-dim hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                        title={`Add liquidity to your ${row.pair} position`}
+                      >
+                        + Add
+                      </button>
+                    ) : null}
                   </td>
                   <td className={CELL}>
                     <div className="font-medium text-ink">{row.pair}</div>

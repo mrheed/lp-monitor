@@ -271,6 +271,76 @@ const fetchAllVaultPositions = async (wallet: string): Promise<VaultPool[]> => {
   return perVault.flat()
 }
 
+const addablePositionSchema = z.object({
+  tokenId: z.string().default(''),
+  /** The position manager contract that minted this position's NFT. */
+  tokenAddress: z.string().default(''),
+  chainId: z.number(),
+  status: z.string().default(''),
+  liquidity: z.string().default('0'),
+  currentPositionValue: z.number().default(0),
+  minPrice: z.number().default(0),
+  maxPrice: z.number().default(0),
+  currentAmounts: z
+    .array(
+      z.object({
+        token: z.object({
+          address: z.string().default(''),
+          symbol: z.string().default(''),
+          decimals: z.number().default(18),
+        }),
+        balance: z.string().default('0'),
+        quotes: z
+          .object({ usd: z.object({ value: z.number().default(0) }).partial() })
+          .partial()
+          .default({}),
+      }),
+    )
+    .default([]),
+  pool: z.object({
+    id: z.string().default(''),
+    hooks: z.string().default(''),
+  }),
+})
+
+const addablePositionsSchema = z.object({
+  positions: z.array(addablePositionSchema).nullish().transform((rows) => rows ?? []),
+})
+
+export type AddablePosition = z.infer<typeof addablePositionSchema> & { wallet: string }
+
+/**
+ * Fetches a wallet's open positions in one pool, with the details an increase transaction needs.
+ *
+ * Separate from the slim positions fetch that drives the held column: that one keeps only pool
+ * id and status for thousands of rows, while this one preserves tokenId, the manager address,
+ * raw amounts and liquidity for the handful of positions in a single pool.
+ */
+export const fetchAddablePositions = async (
+  wallet: string,
+  poolId: string,
+): Promise<AddablePosition[]> => {
+  const params = new URLSearchParams({
+    addresses: wallet,
+    walletAddress: wallet,
+    chainIds: enabledChains()
+      .map((chain) => chain.id)
+      .join(','),
+    quoteSymbols: 'usd',
+    limit: '200',
+  })
+
+  const { positions } = addablePositionsSchema.parse(
+    await getJson(`${BASE}/lp/userPositions?${params}`),
+  )
+
+  const wanted = poolId.toLowerCase()
+  return positions
+    .filter((entry) => entry.pool.id.toLowerCase() === wanted)
+    .filter((entry) => entry.status.toUpperCase() !== 'CLOSED' && entry.liquidity !== '0')
+    .map((entry) => ({ ...entry, wallet }))
+}
+
 /** Fetches direct and vault held positions for every tracked wallet, tagged by wallet. */
 export const fetchWalletPositions = async (wallets: string[]) => {
   const perWallet = await Promise.all(
