@@ -15,6 +15,7 @@ import {
 } from '@/lib/config'
 import { AlertSettings } from './AlertSettings'
 import { AddLiquidity } from './AddLiquidity'
+import { WalletChip } from './WalletChip'
 import type { AlertStatus } from '@/lib/domain/alertWatcher'
 import { DEFAULT_FILTERS, type AlertFilters } from '@/lib/domain/newPools'
 import { rankByScore, scorePools } from '@/lib/domain/score'
@@ -1153,6 +1154,8 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
             <span className="text-ink-ghost">gas</span>
           </label>
         )}
+
+        <WalletChip />
 
         {staleSince === null ? null : (
           <span

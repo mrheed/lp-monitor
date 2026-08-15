@@ -41,6 +41,35 @@ const provider = (): EIP1193Provider | null => {
 /** Whether a browser wallet is available at all. */
 export const walletAvailable = () => provider() !== null
 
+/**
+ * The already-authorised account, without prompting.
+ *
+ * `eth_accounts` returns what the wallet has previously approved for this site and never opens
+ * a dialog, which is what a status chip needs on page load; `eth_requestAccounts` is the one
+ * that prompts, and belongs behind an explicit click.
+ */
+export const currentAccount = async (): Promise<Address | null> => {
+  const injected = provider()
+  if (!injected) return null
+
+  const accounts = (await injected.request({ method: 'eth_accounts' })) as Address[]
+  return accounts[0] ?? null
+}
+
+/** Calls `handler` whenever the wallet switches accounts. Returns the unsubscribe. */
+export const onAccountsChanged = (handler: (account: Address | null) => void): (() => void) => {
+  const injected = provider()
+  if (!injected) return () => {}
+
+  const listener = (accounts: unknown) => {
+    const list = Array.isArray(accounts) ? (accounts as Address[]) : []
+    handler(list[0] ?? null)
+  }
+
+  injected.on('accountsChanged', listener)
+  return () => injected.removeListener('accountsChanged', listener)
+}
+
 /** Connects the wallet and returns the active account. */
 export const connectWallet = async (): Promise<Address> => {
   const injected = provider()
