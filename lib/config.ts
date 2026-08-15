@@ -182,6 +182,17 @@ export const trackedWallets = (): TrackedWallet[] =>
     })
     .filter((wallet) => /^0x[0-9a-f]{40}$/.test(wallet.address))
 
-/** Builds the Krystal dashboard link for a pool, matching the template used by their own app. */
-export const krystalPoolUrl = (chainId: number, poolAddress: string, protocol: string) =>
-  `https://defi.krystal.app/pools/detail?chainId=${chainId}&poolAddress=${poolAddress}&protocol=${protocol}`
+/**
+ * Builds the Krystal dashboard link for a pool, matching the template their own app emits.
+ *
+ * The fee tier is included because Krystal's UI includes it. The detail API answers correctly
+ * without it, so this is about matching their canonical link rather than fixing a broken one.
+ */
+export const krystalPoolUrl = (
+  chainId: number,
+  poolAddress: string,
+  protocol: string,
+  feeTier: number,
+) =>
+  `https://defi.krystal.app/pools/detail?chainId=${chainId}&feeTier=${feeTier}` +
+  `&poolAddress=${poolAddress}&protocol=${protocol}`

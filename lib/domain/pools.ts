@@ -106,7 +106,7 @@ const toRow = (
     position,
     positionVia,
     positionHolders,
-    krystalUrl: krystalPoolUrl(pool.chainId, pool.poolAddress, pool.protocol),
+    krystalUrl: krystalPoolUrl(pool.chainId, pool.poolAddress, pool.protocol, pool.feeTier),
     uniswapUrl: uniswapPoolUrl(pool.chainId, pool.poolAddress),
     age: estimatePoolAge(
       {
