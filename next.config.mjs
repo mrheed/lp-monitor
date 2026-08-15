@@ -22,6 +22,22 @@ const nextConfig = {
       config.resolve.fallback = { ...config.resolve.fallback, fs: false }
     }
 
+    /*
+     * The x402 payment packages are optional peers of @coinbase/cdp-sdk, which arrives through
+     * wagmi's connectors. The SDK marks them optional in its own package.json and imports them
+     * lazily behind a try/catch that only runs if x402 payment signing is called, which nothing
+     * here does. Webpack still insists on resolving the specifiers at build time and fails the
+     * build over packages that are absent by design; aliasing them to false resolves each as an
+     * empty module instead.
+     */
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      '@x402/core/client': false,
+      '@x402/evm/exact/client': false,
+      '@x402/evm/upto/client': false,
+      '@x402/svm/exact/client': false,
+    }
+
     return config
   },
 }
