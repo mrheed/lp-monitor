@@ -1,111 +1,93 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { getAddress, type Address } from 'viem'
-import {
-  connectWallet,
-  currentAccount,
-  onAccountsChanged,
-  walletAvailable,
-} from '@/lib/clients/wallet'
-import { shortenAddress } from '@/lib/config'
+import { ConnectButton } from '@rainbow-me/rainbowkit'
 
 /**
- * The wallet's connection status, always visible beside the table controls.
+ * RainbowKit's connect button, dressed to name the tracked wallets.
  *
- * Before this existed, connection happened invisibly inside the add-liquidity flow, and being
- * on the wrong account only surfaced after several steps of it. The chip shows which account is
- * connected before any flow starts, names it when it is one of the tracked wallets, and follows
- * account switches live.
+ * `ConnectButton.Custom` instead of the stock button for one reason: the stock one shows an
+ * address, and this dashboard knows those addresses by name. Connected as a tracked wallet it
+ * shows the label; connected as anything else it warns in colour, which is the early version of
+ * the refusal the add-liquidity flow would give at the end.
  *
- * The first render is the same on server and client by construction: `window` and the injected
- * provider exist only in the browser, so anything read from them waits for the mount effect.
- * Branching on them during render is the hydration mismatch this codebase has already had once.
+ * RainbowKit's `mounted` flag guards hydration: until it is true the markup must not depend on
+ * anything only the browser knows, the mismatch this codebase has already shipped once.
  */
 export const WalletChip = () => {
-  const [mounted, setMounted] = useState(false)
-  const [account, setAccount] = useState<Address | null>(null)
   const [labels, setLabels] = useState<Map<string, string>>(new Map())
-  const [connecting, setConnecting] = useState(false)
 
   useEffect(() => {
-    setMounted(true)
-
-    // eth_accounts never prompts; it only reports an authorisation that already exists.
-    void currentAccount().then(setAccount)
-    const unsubscribe = onAccountsChanged(setAccount)
-
-    const loadLabels = async () => {
+    const load = async () => {
       try {
         const response = await fetch('/api/wallets')
         if (!response.ok) return
         const body: { wallets?: { address: string; label: string }[] } = await response.json()
-        setLabels(new Map((body.wallets ?? []).map((wallet) => [wallet.address.toLowerCase(), wallet.label])))
+        setLabels(
+          new Map((body.wallets ?? []).map((wallet) => [wallet.address.toLowerCase(), wallet.label])),
+        )
       } catch {
-        // The chip still shows the raw address; names are a nicety.
+        // The chip still shows the address RainbowKit renders; names are a nicety.
       }
     }
-    void loadLabels()
-
-    return unsubscribe
+    void load()
   }, [])
 
-  const connect = async () => {
-    setConnecting(true)
-    try {
-      setAccount(await connectWallet())
-    } catch {
-      // The wallet dialog was dismissed; the chip simply stays disconnected.
-    } finally {
-      setConnecting(false)
-    }
-  }
-
-  // Identical to the server render until mounted, then the real state takes over.
-  if (!mounted) {
-    return (
-      <span className="rounded border border-line px-3 py-2 text-sm text-ink-ghost sm:py-1.5">
-        Wallet
-      </span>
-    )
-  }
-
-  if (!walletAvailable()) {
-    return (
-      <span
-        className="rounded border border-line px-3 py-2 text-sm text-ink-ghost sm:py-1.5"
-        title="Install a browser wallet to add liquidity from the table"
-      >
-        No wallet
-      </span>
-    )
-  }
-
-  if (account === null) {
-    return (
-      <button
-        type="button"
-        onClick={() => void connect()}
-        disabled={connecting}
-        className="rounded border border-line px-3 py-2 text-sm text-ink-muted transition-colors hover:border-accent-dim hover:text-ink disabled:opacity-60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent sm:py-1.5"
-      >
-        {connecting ? 'Connecting…' : 'Connect wallet'}
-      </button>
-    )
-  }
-
-  const label = labels.get(account.toLowerCase())
+  const chip =
+    'rounded border border-line px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent sm:py-1.5'
 
   return (
-    <span
-      className="flex items-center gap-2 rounded border border-line px-3 py-2 text-sm sm:py-1.5"
-      title={`Connected as ${getAddress(account)}${label ? ` (${label})` : ', not one of the tracked wallets'}`}
-    >
-      <span className="h-1.5 w-1.5 rounded-full bg-gain" aria-hidden />
-      <span className={label ? 'text-ink' : 'text-caution'}>
-        {label ?? shortenAddress(account)}
-      </span>
-      {label ? <span className="text-ink-ghost">{shortenAddress(account)}</span> : null}
-    </span>
+    <ConnectButton.Custom>
+      {({ account, chain, openAccountModal, openChainModal, openConnectModal, mounted }) => {
+        if (!mounted) {
+          return <span className={`${chip} text-ink-ghost`}>Wallet</span>
+        }
+
+        if (!account || !chain) {
+          return (
+            <button
+              type="button"
+              onClick={openConnectModal}
+              className={`${chip} text-ink-muted hover:border-accent-dim hover:text-ink`}
+            >
+              Connect wallet
+            </button>
+          )
+        }
+
+        if (chain.unsupported) {
+          return (
+            <button
+              type="button"
+              onClick={openChainModal}
+              className={`${chip} text-risk hover:border-risk`}
+            >
+              Unsupported chain
+            </button>
+          )
+        }
+
+        const label = labels.get(account.address.toLowerCase())
+
+        return (
+          <button
+            type="button"
+            onClick={openAccountModal}
+            className={`${chip} flex items-center gap-2 hover:border-accent-dim`}
+            title={
+              label
+                ? `Connected as ${label} on ${chain.name}`
+                : `Connected on ${chain.name}. This is not one of the tracked wallets, so positions here cannot be increased.`
+            }
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-gain" aria-hidden />
+            <span className={label ? 'text-ink' : 'text-caution'}>
+              {label ?? account.displayName}
+            </span>
+            {label ? <span className="text-ink-ghost">{account.displayName}</span> : null}
+          </button>
+        )
+      }}
+    </ConnectButton.Custom>
   )
 }

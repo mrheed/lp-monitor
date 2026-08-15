@@ -1,13 +1,10 @@
 import {
-  createPublicClient,
-  custom,
   encodeAbiParameters,
-  http,
   keccak256,
   parseAbi,
   getAddress,
   type Address,
-  type EIP1193Provider,
+  type PublicClient,
 } from 'viem'
 import { decodePositionInfo, decodeSlot0, POOLS_SLOT } from '../domain/v4Math'
 import type { PoolState } from '../domain/addLiquidity'
@@ -19,16 +16,11 @@ const POSITION_MANAGER = parseAbi([
 
 const POOL_MANAGER = parseAbi(['function extsload(bytes32 slot) view returns (bytes32)'])
 
-/** How to reach the chain: the browser wallet's provider, or an HTTP RPC for scripts. */
-export type ChainTransport = { provider: EIP1193Provider } | { rpcUrl: string }
-
-const clientFor = (transport: ChainTransport) =>
-  createPublicClient({
-    transport: 'provider' in transport ? custom(transport.provider) : http(transport.rpcUrl),
-  })
-
 /**
  * Reads where a position and its pool stand right now, from the chain itself.
+ *
+ * The client comes from the caller: wagmi supplies one bound to the app's own RPC transports,
+ * so the state loads before any wallet is connected at all.
  *
  * Two reads through the position manager, then one raw storage read on the PoolManager:
  * v4 keeps pool state in a singleton and exposes it through `extsload`, so slot0 is fetched by
@@ -39,12 +31,11 @@ const clientFor = (transport: ChainTransport) =>
  * minutes ago describes a pool that no longer exists.
  */
 export const readPoolState = async (
-  transport: ChainTransport,
+  client: PublicClient,
   positionManager: string,
   tokenId: bigint,
   poolId: string,
 ): Promise<PoolState> => {
-  const client = clientFor(transport)
   const manager = getAddress(positionManager)
 
   const [, info] = await client.readContract({

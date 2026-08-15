@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { PoolTable } from './PoolTable'
+import { Providers } from '@/app/providers'
 import type { PoolRow } from '@/lib/types'
 
 /** A real pool from the watched set: $67.3k of liquidity earning $19 an hour. */
@@ -42,7 +43,9 @@ const row: PoolRow = {
 
 const render = () =>
   renderToStaticMarkup(
-    <PoolTable initialRows={[row]} />,
+    <Providers>
+      <PoolTable initialRows={[row]} />
+    </Providers>,
   )
 
 describe('the compounding projection', () => {

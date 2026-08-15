@@ -2,16 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getAddress, type Address } from 'viem'
+import { useAccount, usePublicClient, useSwitchChain, useWalletClient } from 'wagmi'
+import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { planIncrease, type OpenPosition } from '@/lib/domain/addLiquidity'
 import { buildIncreaseCalldata, nativeValueFor } from '@/lib/domain/v4Calldata'
-import {
-  connectWallet,
-  ensureChain,
-  missingApprovals,
-  send,
-  simulate,
-  walletAvailable,
-} from '@/lib/clients/wallet'
+import { missingApprovals, simulate } from '@/lib/clients/wallet'
 import { readPoolState } from '@/lib/clients/poolState'
 import type { PoolState } from '@/lib/domain/addLiquidity'
 import { chainLabel } from '@/lib/chains'
@@ -62,6 +57,10 @@ const tokenAmount = (raw: bigint, decimals: number) => {
  * instead of on chain as burned gas.
  */
 export const AddLiquidity = ({ row, onClose }: { row: PoolRow; onClose: () => void }) => {
+  const { address: connected } = useAccount()
+  const { openConnectModal } = useConnectModal()
+  const { switchChainAsync } = useSwitchChain()
+  const { data: walletClient } = useWalletClient()
   const [positions, setPositions] = useState<AddablePosition[] | null>(null)
   const [chosen, setChosen] = useState(0)
   const [depositUsd, setDepositUsd] = useState(100)
@@ -104,19 +103,17 @@ export const AddLiquidity = ({ row, onClose }: { row: PoolRow; onClose: () => vo
   const [poolState, setPoolState] = useState<PoolState | null>(null)
   const [poolStateError, setPoolStateError] = useState<string | null>(null)
 
+  // wagmi's client for the position's chain runs over the app's own RPC transports, so the
+  // state loads before any wallet is connected at all.
+  const publicClient = usePublicClient({ chainId: position?.chainId })
+
   useEffect(() => {
-    if (!position) return
+    if (!position || !publicClient) return
     let cancelled = false
     setPoolState(null)
     setPoolStateError(null)
 
-    const injected = (window as { ethereum?: import('viem').EIP1193Provider }).ethereum
-    if (!injected) {
-      setPoolStateError('No browser wallet found, so the pool state cannot be read.')
-      return
-    }
-
-    readPoolState({ provider: injected }, position.tokenAddress, BigInt(position.tokenId), position.pool.id)
+    readPoolState(publicClient, position.tokenAddress, BigInt(position.tokenId), position.pool.id)
       .then((state) => {
         if (!cancelled) setPoolState(state)
       })
@@ -128,7 +125,7 @@ export const AddLiquidity = ({ row, onClose }: { row: PoolRow; onClose: () => vo
     return () => {
       cancelled = true
     }
-  }, [position])
+  }, [position, publicClient])
 
   /** The plan under the current inputs, or the reason there is none. */
   const plan = useMemo(() => {
@@ -151,12 +148,17 @@ export const AddLiquidity = ({ row, onClose }: { row: PoolRow; onClose: () => vo
   }, [position, poolState, depositUsd, slippagePercent])
 
   const submit = useCallback(async () => {
-    if (!position || !plan?.plan) return
+    if (!position || !plan?.plan || !publicClient) return
     const [side0, side1] = plan.plan.maxAmounts
 
+    // Not connected yet: RainbowKit's modal owns that flow; the send resumes on the next click.
+    if (!connected) {
+      openConnectModal?.()
+      return
+    }
+
     try {
-      setStep({ kind: 'busy', label: 'Connecting wallet' })
-      const account = await connectWallet()
+      const account = connected
 
       if (getAddress(account) !== getAddress(position.wallet)) {
         throw new Error(
@@ -165,11 +167,16 @@ export const AddLiquidity = ({ row, onClose }: { row: PoolRow; onClose: () => vo
       }
 
       setStep({ kind: 'busy', label: `Switching to ${chainLabel(position.chainId)}` })
-      await ensureChain(position.chainId)
+      const switched = await switchChainAsync({ chainId: position.chainId })
+      if (switched.id !== position.chainId) {
+        throw new Error(`The wallet stayed on ${chainLabel(switched.id)}.`)
+      }
+      if (!walletClient) throw new Error('The wallet is connected but provides no signer.')
 
       setStep({ kind: 'busy', label: 'Checking token approvals' })
       const manager = getAddress(position.tokenAddress) as Address
       const approvals = await missingApprovals(
+        publicClient,
         account,
         manager,
         plan.plan.maxAmounts.map((amount, index) => ({
@@ -181,7 +188,7 @@ export const AddLiquidity = ({ row, onClose }: { row: PoolRow; onClose: () => vo
 
       for (const approval of approvals) {
         setStep({ kind: 'busy', label: approval.description })
-        await send(account, { to: approval.to, data: approval.data })
+        await walletClient.sendTransaction({ to: approval.to, data: approval.data })
       }
 
       const call = {
@@ -203,10 +210,14 @@ export const AddLiquidity = ({ row, onClose }: { row: PoolRow; onClose: () => vo
       }
 
       setStep({ kind: 'busy', label: 'Simulating the exact transaction' })
-      await simulate(account, transaction)
+      await simulate(publicClient, account, transaction)
 
       setStep({ kind: 'busy', label: 'Waiting for wallet confirmation' })
-      const hash = await send(account, transaction)
+      const hash = await walletClient.sendTransaction({
+        to: transaction.to,
+        data: transaction.data,
+        value: transaction.value,
+      })
       setStep({ kind: 'sent', hash })
     } catch (error) {
       setStep({
@@ -214,7 +225,7 @@ export const AddLiquidity = ({ row, onClose }: { row: PoolRow; onClose: () => vo
         message: error instanceof Error ? error.message : 'The transaction failed.',
       })
     }
-  }, [position, plan])
+  }, [position, plan, publicClient, connected, openConnectModal, switchChainAsync, walletClient])
 
   return (
     <div
@@ -339,15 +350,15 @@ export const AddLiquidity = ({ row, onClose }: { row: PoolRow; onClose: () => vo
 
             <button
               type="button"
-              disabled={!plan?.plan || step.kind === 'busy' || !walletAvailable()}
+              disabled={!plan?.plan || step.kind === 'busy'}
               onClick={() => void submit()}
               className="w-full rounded border border-accent-dim bg-accent-dim/20 px-4 py-2.5 font-medium text-ink transition-colors hover:bg-accent-dim/35 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             >
               {step.kind === 'busy'
                 ? `${step.label}…`
-                : walletAvailable()
+                : connected
                   ? 'Review in wallet'
-                  : 'No browser wallet found'}
+                  : 'Connect wallet'}
             </button>
           </div>
         )}
