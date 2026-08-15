@@ -19,23 +19,33 @@ const nextConfig = {
    */
   webpack: (config, { isServer, nextRuntime }) => {
     if (!isServer || nextRuntime === 'edge') {
-      config.resolve.fallback = { ...config.resolve.fallback, fs: false }
+      // `crypto` joins fs for the same reason: @coinbase/cdp-sdk imports the builtin bare, and
+      // the browser bundle has no polyfill. The importing utilities belong to CDP's server-side
+      // API workflows, which the wallet connector path never calls.
+      config.resolve.fallback = { ...config.resolve.fallback, fs: false, crypto: false }
     }
 
     /*
      * The x402 payment packages are optional peers of @coinbase/cdp-sdk, which arrives through
-     * wagmi's connectors. The SDK marks them optional in its own package.json and imports them
-     * lazily behind a try/catch that only runs if x402 payment signing is called, which nothing
-     * here does. Webpack still insists on resolving the specifiers at build time and fails the
-     * build over packages that are absent by design; aliasing them to false resolves each as an
-     * empty module instead.
+     * wagmi's connectors. The SDK marks them optional in its own package.json and reaches them
+     * only from code paths that sign x402 payments, which nothing here does. Webpack still
+     * insists on resolving every specifier at build time and fails the build over packages that
+     * are absent by design.
+     *
+     * Aliased at the package root, which webpack prefix-matches over every subpath. The first
+     * version of this fix listed the four dynamically imported subpaths and lasted one day: a
+     * lazily loaded module inside the SDK statically imports the bare package, and the full
+     * import set across its x402 code spans six packages and a dozen entry points.
      */
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      '@x402/core/client': false,
-      '@x402/evm/exact/client': false,
-      '@x402/evm/upto/client': false,
-      '@x402/svm/exact/client': false,
+    for (const missing of [
+      '@x402/core',
+      '@x402/evm',
+      '@x402/svm',
+      '@x402/extensions',
+      '@x402/express',
+      '@x402/fetch',
+    ]) {
+      config.resolve.alias = { ...config.resolve.alias, [missing]: false }
     }
 
     return config
