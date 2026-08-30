@@ -5,7 +5,7 @@ const target = { poolId: '0xAbC', protocol: 'uniswapv3', chainId: 4663 }
 
 /** Replies with one ListTransactions body, capturing the request for assertions. */
 const stubFetch = (body: unknown) => {
-  const spy = vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }))
+  const spy = vi.fn(async (..._args: Parameters<typeof fetch>) => new Response(JSON.stringify(body), { status: 200 }))
   vi.stubGlobal('fetch', spy)
   return spy
 }
@@ -74,9 +74,7 @@ describe('fetchPoolSwaps', () => {
 
     await fetchPoolSwaps(target, { pageToken: 'seek-me', pageSize: 50 })
 
-    // Vitest mock call arguments are not typed precisely; we need a cast to access the body
-    const callArgs = spy.mock.calls[0] as unknown[]
-    const body: unknown = JSON.parse(String((callArgs[1] as Record<string, unknown>)?.body))
+    const body: unknown = JSON.parse(String(spy.mock.calls[0][1]?.body))
     expect(body).toMatchObject({ page: { pageSize: 50, pageToken: 'seek-me' } })
   })
 
