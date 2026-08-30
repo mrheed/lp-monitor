@@ -28,6 +28,7 @@ import { rankByScore, scorePools, type ScoreWeights } from './score'
 import { recentFeeRate } from './feeWindow'
 import { estimatePoolAge, poolAgeSpanMs } from './poolAge'
 import { getFirstSeen } from './alertWatcher'
+import { isStockPool } from './stockTokens'
 
 const ZERO_HOOK = '0x0000000000000000000000000000000000000000'
 
@@ -57,6 +58,12 @@ export type PoolsSnapshot = {
   warnings: string[]
   fetchedAt: string
 }
+
+/** Whether a feed pool holds an issued equity on either side. */
+export const buildStockFlag = (pool: {
+  token0: { address: string }
+  token1: { address: string }
+}): boolean => isStockPool({ token0Address: pool.token0.address, token1Address: pool.token1.address })
 
 /**
  * Flattens a Krystal pool into a table row.
@@ -101,6 +108,7 @@ const toRow = (
     hooks: pool.hooks,
     hasHook: Boolean(pool.hooks) && pool.hooks !== ZERO_HOOK,
     tag: pool.tag ?? '',
+    isStock: buildStockFlag(pool),
     tvlUsd: pool.tvlUsd,
     totalFeesUsd: pool.stat30d.feeUsd,
     recentFeesPerHourUsd: recent.perHourUsd,

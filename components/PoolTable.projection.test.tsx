@@ -20,6 +20,7 @@ const row: PoolRow = {
   hooks: '',
   hasHook: false,
   tag: '',
+  isStock: false,
   tvlUsd: 67_300,
   totalFeesUsd: 9_000,
   recentFeesPerHourUsd: 19,

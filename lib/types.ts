@@ -95,6 +95,8 @@ export type PoolRow = {
   hooks: string
   hasHook: boolean
   tag: string
+  /** Whether either side is one of the tokenized equities Robinhood issued on this chain. */
+  isStock: boolean
   tvlUsd: number
   /** Accumulated fees over the widest window available. Shown, never scored. */
   totalFeesUsd: number
