@@ -205,3 +205,21 @@ export const krystalPoolUrl = (
 ) =>
   `https://defi.krystal.app/pools/detail?chainId=${chainId}&feeTier=${feeTier}` +
   `&poolAddress=${poolAddress}&protocol=${protocol}`
+
+/**
+ * Stock pools sampled for volume history on each pass.
+ *
+ * The 214 stock pools are ordered by 24 hour volume and the top slice is sampled, because a pool
+ * doing under a thousand dollars an hour cannot produce a spike that clears the alert floor and
+ * charting it adds nothing.
+ */
+export const VOLUME_SAMPLE_POOL_LIMIT = 40
+
+/** Swaps read per hourly sample. One page: enough to imply a rate, cheap enough to repeat. */
+export const VOLUME_SAMPLE_PAGE_SIZE = 100
+
+/** Hours of history fetched the first time a pool is seen. */
+export const VOLUME_BACKFILL_HOURS = 48
+
+/** Sampling requests in flight at once, well under the sweep's own concurrency. */
+export const VOLUME_SAMPLE_CONCURRENCY = 6
