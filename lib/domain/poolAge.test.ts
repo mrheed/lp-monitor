@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activitySpanMs, estimatePoolAge, formatAge } from './poolAge'
+import { activitySpanMs, estimatePoolAge, formatAge, poolAgeSpanMs } from './poolAge'
 
 /** Builds cumulative volume windows. */
 const volume = (hour: number, day: number, week: number, month: number) => ({
@@ -81,6 +81,24 @@ describe('activitySpanMs', () => {
 
   it('still detects genuine growth, which dwarfs the noise threshold', () => {
     expect(activitySpanMs(volume(10, 1_000, 900, 5_000))).toBe(7 * DAY)
+  })
+})
+
+describe('poolAgeSpanMs', () => {
+  it('falls back to the inferred activity span when the pool was not seen appearing', () => {
+    expect(poolAgeSpanMs(volume(10, 100, 1_000, 9_000))).toBe(7 * DAY)
+    expect(poolAgeSpanMs(volume(100, 100, 100, 100))).toBe(0)
+  })
+
+  it('uses the exact age since the pool was first seen', () => {
+    const firstSeenAt = Date.now() - 3 * HOUR
+    const span = poolAgeSpanMs(volume(0, 0, 0, 0), firstSeenAt)
+    expect(span).toBeGreaterThanOrEqual(3 * HOUR)
+    expect(span).toBeLessThan(3 * HOUR + DAY)
+  })
+
+  it('never returns a negative age', () => {
+    expect(poolAgeSpanMs(volume(0, 0, 0, 0), Date.now() + HOUR)).toBe(0)
   })
 })
 

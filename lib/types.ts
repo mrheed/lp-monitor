@@ -126,6 +126,8 @@ export type PoolRow = {
   uniswapUrl: string
   /** How far back the pool's recorded activity extends, as a label like `3h` or `1w`. */
   age: string
+  /** The same age as a numeric millisecond span, for filtering and sorting. */
+  ageMs: number
   /** Composite 0..1 rank across fee rate, thinness, trade rate, traders and calmness. */
   score: number | null
   scoreParts: {

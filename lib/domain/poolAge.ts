@@ -70,9 +70,15 @@ export const formatAge = (spanMs: number, exact = true): string => {
  * Watching for the pool to appear is the only way to learn its age exactly, and it only works
  * for pools that appear after watching began.
  */
-export const estimatePoolAge = (volume: VolumeWindows, firstSeenAt?: number): string =>
+/**
+ * The numeric age span in milliseconds behind {@link estimatePoolAge}: the exact age when the
+ * pool was seen appearing, otherwise the inferred lower bound from the volume windows. Exposed so
+ * callers can filter or sort by age without parsing the label back.
+ */
+export const poolAgeSpanMs = (volume: VolumeWindows, firstSeenAt?: number): number =>
   // A falsy timestamp is the baseline marker: the pool was already there when watching began, so
   // the sighting says it exists and nothing about when it started.
-  firstSeenAt
-    ? formatAge(Date.now() - firstSeenAt, true)
-    : formatAge(activitySpanMs(volume), false)
+  firstSeenAt ? Math.max(0, Date.now() - firstSeenAt) : activitySpanMs(volume)
+
+export const estimatePoolAge = (volume: VolumeWindows, firstSeenAt?: number): string =>
+  formatAge(poolAgeSpanMs(volume, firstSeenAt), Boolean(firstSeenAt))

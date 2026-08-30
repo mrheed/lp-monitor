@@ -12,6 +12,15 @@ export const ACTIVITY_POOL_LIMIT = 60
 export const ACTIVITY_BATCH_SIZE = 25
 
 /**
+ * How long the page render will wait for the eager activity pass before rendering without it.
+ *
+ * Measuring costs one request per pool, so a cold cache takes tens of seconds. The table sweeps
+ * for the same measurements from the browser, so giving up early loses first-paint ranking
+ * accuracy rather than the data itself.
+ */
+export const ACTIVITY_EAGER_BUDGET_MS = 6_000
+
+/**
  * How many activity requests the table keeps in flight while sweeping.
  *
  * The sweep runs in the background until every pool is measured, because the score is a

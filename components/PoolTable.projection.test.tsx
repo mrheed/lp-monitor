@@ -37,6 +37,7 @@ const row: PoolRow = {
   krystalUrl: 'https://defi.krystal.app/pools/detail',
   uniswapUrl: 'https://app.uniswap.org/explore/pools',
   age: '3d',
+  ageMs: 3 * 24 * 60 * 60_000,
   score: 0.5,
   scoreParts: null,
 }
