@@ -11,7 +11,7 @@ afterEach(() => {
 
 describe('robinhoodRpcUrls', () => {
   it('falls back to the public endpoints when nothing is configured', () => {
-    expect(robinhoodRpcUrls()).toEqual(ROBINHOOD_FALLBACK_RPCS)
+    expect(robinhoodRpcUrls()).toEqual([...ROBINHOOD_FALLBACK_RPCS])
   })
 
   it('puts a configured endpoint first, keeping the public ones behind it', () => {
@@ -42,6 +42,6 @@ describe('robinhoodRpcUrls', () => {
   it('never lists the same endpoint twice when it also appears in the fallbacks', () => {
     process.env[PRIVATE] = ROBINHOOD_FALLBACK_RPCS[0]
 
-    expect(robinhoodRpcUrls()).toEqual(ROBINHOOD_FALLBACK_RPCS)
+    expect(robinhoodRpcUrls()).toEqual([...ROBINHOOD_FALLBACK_RPCS])
   })
 })

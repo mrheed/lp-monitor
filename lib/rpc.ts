@@ -1,17 +1,21 @@
 /**
  * Robinhood Chain RPC endpoints, configurable without editing the source.
  *
- * The two public endpoints below were both failing when last checked, which takes down every
- * on-chain read the app makes. An operator with their own provider should be able to point the
- * app at it, so the configured endpoint leads and the public ones stay behind it as fallbacks
- * rather than being replaced.
+ * Both public endpoints for this chain were failing when last checked, which takes down every
+ * on-chain read the app makes. An operator with their own provider points the app at it here, so
+ * the configured endpoint leads and what remains public stays behind it rather than being
+ * replaced.
  */
 
-/** The public endpoints, used when nothing is configured. Ordered by which answered more often. */
-export const ROBINHOOD_FALLBACK_RPCS = [
-  'https://rpc.arrowrpc.com',
-  'https://rpc.mainnet.chain.robinhood.com',
-] as const
+/**
+ * The public endpoint, used when nothing is configured.
+ *
+ * `rpc.arrowrpc.com` was here and has been dropped: it answers every request with Cloudflare
+ * 1033, so leaving it first meant every on-chain read waited for a failure before trying anything
+ * else. The official endpoint below was also refusing connections when last checked, which is why
+ * configuring your own is worth doing rather than optional.
+ */
+export const ROBINHOOD_FALLBACK_RPCS = ['https://rpc.mainnet.chain.robinhood.com'] as const
 
 /** A trimmed environment value, or null when it is absent or blank. */
 const configured = (name: string): string | null => {
