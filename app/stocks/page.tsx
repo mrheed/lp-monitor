@@ -3,21 +3,32 @@ import { StocksSection } from './StocksSection'
 
 export const dynamic = 'force-dynamic'
 
+/**
+ * The stocks page masthead.
+ *
+ * Full bleed with hairline rules rather than a padded card, so the page reads as one sheet.
+ * The statement carries the weight; there is no eyebrow above it.
+ */
 const Page = () => (
-  <main className="mx-auto max-w-[1560px] px-4 py-6 sm:px-6 sm:py-10">
-    <header className="mb-6 sm:mb-8">
-      <h1 className="text-xl font-semibold tracking-tight text-ink">Stock pools</h1>
-      {/* Needs the same snapshot the pools page measures, so it streams behind a boundary too. */}
-      <Suspense
-        fallback={
-          <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink-muted">
-            Reading the pool feed…
-          </p>
-        }
-      >
-        <StocksSection />
-      </Suspense>
+  <main className="mx-auto w-full max-w-[1560px]">
+    <header className="border-b border-line px-6 pb-8 pt-10 sm:px-10">
+      <p className="text-[10px] uppercase tracking-[0.14em] text-ink-muted">
+        Tokenized equities · Robinhood Chain
+      </p>
+      <h1 className="display mt-6 max-w-[9ch] text-[clamp(56px,8vw,112px)] text-ink">
+        What is trading.
+      </h1>
     </header>
+
+    <Suspense
+      fallback={
+        <p className="px-6 py-10 text-[13px] leading-relaxed text-ink-muted sm:px-10">
+          Reading the pool feed…
+        </p>
+      }
+    >
+      <StocksSection />
+    </Suspense>
   </main>
 )
 

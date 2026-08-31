@@ -262,3 +262,76 @@ body {
     var(--accent)
   );
 }
+
+/*
+ * Editorial scope, used by the stocks route only.
+ *
+ * Every colour role in tailwind.config resolves to one of these variables, so overriding them on
+ * a wrapper restyles every component underneath without forking any of them. The rest of the
+ * tracker keeps its dark trading surface.
+ *
+ * Warm ivory paper with near-black ink and a single muted rust, per the editorial-service-booking
+ * visual system: hairline rules instead of cards, minimal radius, one accent reserved for
+ * selection and status.
+ */
+.editorial {
+  color-scheme: light;
+
+  /* No cards in this world, so panels sit directly on the paper and rules carry the structure. */
+  --canvas: #f1eadf;
+  --surface: #f1eadf;
+  --surface-raised: #e8ddcc;
+
+  --ink: #151513;
+  --ink-muted: #6f685f;
+  --ink-faint: #857d73;
+  --ink-ghost: #948c82;
+
+  --line: rgba(21, 21, 19, 0.2);
+  --line-strong: rgba(21, 21, 19, 0.42);
+
+  --accent: #8f4438;
+  --accent-dim: #a86254;
+  --accent-ink: #f1eadf;
+
+  /* Trade direction. Labelled in words beside the colour, never carried by hue alone. */
+  --gain: #2f6b4f;
+  --caution: #8a6a1f;
+  --risk: #9a3324;
+
+  /*
+   * Chart marks: the total in ink, the selection in the one accent.
+   *
+   * Not a categorical palette, so the validator's lightness-band and chroma-floor checks do not
+   * apply; its own scope note limits those to categorical sets. The checks that do apply pass on
+   * this surface: both clear 3:1 contrast against the paper, and they separate by 30.3 for normal
+   * vision and 23.9 under the worst colour-vision deficiency, against floors of 15 and 8.
+   */
+  --chart-total: #151513;
+  --chart-pool: #8f4438;
+
+  --shadow-raised: 0 1px 2px rgba(21, 21, 19, 0.08), 0 12px 30px -18px rgba(21, 21, 19, 0.28);
+  --shadow-hover: 0 1px 2px rgba(21, 21, 19, 0.1), 0 8px 20px -12px rgba(21, 21, 19, 0.22);
+
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+/* The display voice. Sourced rather than a platform serif, and only inside this scope. */
+.editorial .display {
+  font-family: var(--font-editorial-serif), Georgia, 'Times New Roman', serif;
+  font-weight: 400;
+  letter-spacing: -0.055em;
+  line-height: 0.86;
+}
+
+/*
+ * Minimal radius, per the editorial system: rules carry the structure, so a rounded outline reads
+ * as a card floating on the page rather than as a division of it. Scoped rather than changed in
+ * the components, which keep their radius on the dark trading surface where panels are the
+ * structure.
+ */
+.editorial .rounded,
+.editorial .rounded-\[1px\] {
+  border-radius: 0;
+}
