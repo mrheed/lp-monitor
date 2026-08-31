@@ -1,13 +1,20 @@
-import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { BUCKET_LIMIT, isVolumeBucket, type VolumeBucket } from './volumeHistory'
+// Imported bare rather than as `node:fs`, matching alertStore and the rest of this codebase.
+// next.config stubs `fs` to false for the client and edge builds, and that fallback matches the
+// bare specifier only: webpack treats `node:fs` as a URI scheme and fails the build over it.
+// Reached from those builds because instrumentation.ts imports the alert watcher, which imports
+// the sampler, which imports this; the NEXT_RUNTIME guard is a runtime check and the bundler
+// still resolves the whole graph.
+import { readFileSync, renameSync, rmSync, writeFileSync } from 'fs'
+import { BUCKET_LIMIT, isVolumeBucket, type VolumeBucket, type VolumeHistory } from './volumeHistory'
 
 const HISTORY_FILE = '.volume-history.json'
 
 /** The temp file sits beside the target, so the rename onto it stays on one filesystem. */
 const TEMP_FILE = `${HISTORY_FILE}.tmp`
 
-/** Hourly buckets per pool, keyed by lowercased pool id. */
-export type VolumeHistory = Record<string, VolumeBucket[]>
+// Re-exported so server-side callers can keep importing it from here alongside the readers and
+// writers they use it with. It is declared in volumeHistory because client code needs it too.
+export type { VolumeHistory } from './volumeHistory'
 
 /** How many consecutive backfills for a pool returned nothing, and when the last one ran. */
 export type BackfillAttempt = { attempts: number; lastAttemptMs: number }

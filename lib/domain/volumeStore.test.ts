@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { renameSync, rmSync, writeFileSync } from 'node:fs'
+import { renameSync, rmSync, writeFileSync } from 'fs'
 import { HOUR_MS } from './volumeHistory'
 import { interpretVolumeStore, writeVolumeStore } from './volumeStore'
 
 // The filesystem is mocked so the atomic write can be asserted by the calls it makes, without
 // leaving a history file in the repo. The interpreter below touches no filesystem at all.
-vi.mock('node:fs', () => ({
+vi.mock('fs', () => ({
   readFileSync: vi.fn(),
   writeFileSync: vi.fn(),
   renameSync: vi.fn(),

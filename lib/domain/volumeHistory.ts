@@ -39,6 +39,16 @@ export const isVolumeBucket = (value: unknown): value is VolumeBucket => {
   )
 }
 
+/**
+ * Hourly buckets per pool, keyed by lowercased pool id.
+ *
+ * Declared here rather than beside the file reading in `volumeStore`, because client components
+ * need this type and `volumeStore` opens with `node:fs`. Next resolves a client component's
+ * imports even when they are type-only, so importing it from there pulled `node:fs` into the
+ * browser bundle and webpack refused to build the route.
+ */
+export type VolumeHistory = Record<string, VolumeBucket[]>
+
 /** The hour boundary at or after `ms`, which is how a bucket is labelled. */
 export const alignHourEnd = (ms: number): number => Math.ceil(ms / HOUR_MS) * HOUR_MS
 

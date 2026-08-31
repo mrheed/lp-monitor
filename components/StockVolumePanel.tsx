@@ -2,8 +2,12 @@
 
 import { useEffect, useState } from 'react'
 import { StockVolumeChart } from './StockVolumeChart'
-import { hourlyReadings, isVolumeBucket, type VolumeBucket } from '@/lib/domain/volumeHistory'
-import type { VolumeHistory } from '@/lib/domain/volumeStore'
+import {
+  hourlyReadings,
+  isVolumeBucket,
+  type VolumeBucket,
+  type VolumeHistory,
+} from '@/lib/domain/volumeHistory'
 
 /** How often the panel re-reads the history. The watcher samples once a minute. */
 const VOLUME_POLL_MS = 60_000
