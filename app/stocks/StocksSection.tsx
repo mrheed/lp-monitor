@@ -1,5 +1,5 @@
 import { PoolTable } from '@/components/PoolTable'
-import { StockVolumeChart } from '@/components/StockVolumeChart'
+import { StockVolumePanel } from '@/components/StockVolumePanel'
 import { getPoolsSnapshot } from '@/lib/domain/pools'
 import { STOCK_TOKEN_COUNT } from '@/lib/domain/stockTokens'
 import { aggregateSeries } from '@/lib/domain/volumeSampler'
@@ -14,7 +14,8 @@ import { readVolumeHistory } from '@/lib/domain/volumeStore'
 export const StocksSection = async () => {
   const { rows, fetchedAt } = await getPoolsSnapshot()
   const stockRows = rows.filter((row) => row.isStock)
-  const aggregate = aggregateSeries(readVolumeHistory())
+  const byPool = readVolumeHistory()
+  const aggregate = aggregateSeries(byPool)
 
   const tvl = stockRows.reduce((total, row) => total + row.tvlUsd, 0)
   const volume = stockRows.reduce((total, row) => total + row.volume24hUsd, 0)
@@ -32,7 +33,11 @@ export const StocksSection = async () => {
       </p>
 
       <div className="mt-6">
-        <StockVolumeChart aggregate={aggregate} selected={null} selectedLabel={null} />
+        <StockVolumePanel
+          aggregate={aggregate}
+          byPool={byPool}
+          pools={stockRows.map(({ poolId, pair }) => ({ poolId, pair }))}
+        />
       </div>
 
       <div className="mt-6 sm:mt-8">
