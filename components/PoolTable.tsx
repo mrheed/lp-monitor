@@ -15,7 +15,6 @@ import {
 } from '@/lib/config'
 import { AlertSettings } from './AlertSettings'
 import { AddLiquidity } from './AddLiquidity'
-import { WalletChip } from './WalletChip'
 import type { AlertStatus } from '@/lib/domain/alertWatcher'
 import { DEFAULT_FILTERS, type AlertFilters } from '@/lib/domain/newPools'
 import { rankByScore, scorePools } from '@/lib/domain/score'
@@ -138,8 +137,36 @@ const TABLE_COLUMNS = 19
  * thirty. The number stays beside it, so the colour speeds up scanning without being the only
  * thing that carries the value.
  */
+/** Volatility risk thresholds, shared by the status colour and the filter. */
+const VOLATILITY_ELEVATED = 25
+const VOLATILITY_HIGH = 60
+
 const volatilityTone = (percent: number) =>
-  percent >= 60 ? 'text-risk' : percent >= 25 ? 'text-caution' : 'text-ink-muted'
+  percent >= VOLATILITY_HIGH
+    ? 'text-risk'
+    : percent >= VOLATILITY_ELEVATED
+      ? 'text-caution'
+      : 'text-ink-muted'
+
+type VolatilityBand = 'all' | 'calm' | 'elevated' | 'high'
+
+const VOLATILITY_BANDS: readonly VolatilityBand[] = ['all', 'calm', 'elevated', 'high']
+
+/** Narrow a select value to a VolatilityBand, defaulting to 'all'. */
+const volatilityBandFrom = (value: string): VolatilityBand =>
+  VOLATILITY_BANDS.find((band) => band === value) ?? 'all'
+
+/** Whether a pool's volatility falls in the selected risk band. */
+const inVolatilityBand = (percent: number, band: VolatilityBand): boolean => {
+  if (band === 'calm') return percent < VOLATILITY_ELEVATED
+  if (band === 'elevated') return percent >= VOLATILITY_ELEVATED && percent < VOLATILITY_HIGH
+  if (band === 'high') return percent >= VOLATILITY_HIGH
+  return true
+}
+
+const AGE_HOUR_MS = 60 * 60_000
+const AGE_DAY_MS = 24 * AGE_HOUR_MS
+const AGE_WEEK_MS = 7 * AGE_DAY_MS
 
 /**
  * The span a sample covered, as a compact label.
@@ -633,6 +660,9 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
   const [remainingMs, setRemainingMs] = useState(REFRESH_INTERVAL_MS)
   const [query, setQuery] = useState('')
   const [minTvl, setMinTvl] = useState(0)
+  const [maxTvl, setMaxTvl] = useState(0)
+  const [volatility, setVolatility] = useState<VolatilityBand>('all')
+  const [maxAgeMs, setMaxAgeMs] = useState(0)
   const [onlyMine, setOnlyMine] = useState(false)
   const [protocol, setProtocol] = useState('all')
   const [chain, setChain] = useState('all')
@@ -839,6 +869,9 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
     const needle = query.trim().toLowerCase()
     const filtered = rows.filter((row) => {
       if (row.tvlUsd < minTvl) return false
+      if (maxTvl > 0 && row.tvlUsd >= maxTvl) return false
+      if (!inVolatilityBand(row.priceVolatility, volatility)) return false
+      if (maxAgeMs > 0 && row.ageMs >= maxAgeMs) return false
       if (onlyMine && row.position === 'none') return false
       if (protocol !== 'all' && row.protocol !== protocol) return false
       if (chain !== 'all' && String(row.chainId) !== chain) return false
@@ -855,7 +888,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
     return [...filtered].sort(
       (a, b) => sortValue(b, sortKey, projection) - sortValue(a, sortKey, projection),
     )
-  }, [rows, query, minTvl, onlyMine, protocol, chain, sortKey, projection])
+  }, [rows, query, minTvl, maxTvl, volatility, maxAgeMs, onlyMine, protocol, chain, sortKey, projection])
 
   const onScreen = visible.slice(0, visibleCount)
 
@@ -1005,7 +1038,7 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
   // A changed filter should start from the top rather than keep a deep scroll position.
   useEffect(() => {
     setVisibleCount(ROW_PAGE_SIZE)
-  }, [query, minTvl, onlyMine, protocol, chain, sortKey])
+  }, [query, minTvl, maxTvl, volatility, maxAgeMs, onlyMine, protocol, chain, sortKey])
 
   // Focus is a visible ring, not just a border tint: a one-step border shift is invisible to a
   // keyboard user moving through seven controls.
@@ -1038,6 +1071,28 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
           <option value={10_000}>TVL over $10k</option>
           <option value={100_000}>TVL over $100k</option>
           <option value={1_000_000}>TVL over $1M</option>
+        </select>
+        <select value={maxTvl} onChange={(e) => setMaxTvl(Number(e.target.value))} className={control}>
+          <option value={0}>No TVL cap</option>
+          <option value={10_000}>TVL below $10k</option>
+          <option value={100_000}>TVL below $100k</option>
+          <option value={1_000_000}>TVL below $1M</option>
+        </select>
+        <select
+          value={volatility}
+          onChange={(e) => setVolatility(volatilityBandFrom(e.target.value))}
+          className={control}
+        >
+          <option value="all">Any volatility</option>
+          <option value="calm">Calm (under 25%)</option>
+          <option value="elevated">Elevated (25 to 60%)</option>
+          <option value="high">High risk (60%+)</option>
+        </select>
+        <select value={maxAgeMs} onChange={(e) => setMaxAgeMs(Number(e.target.value))} className={control}>
+          <option value={0}>Any age</option>
+          <option value={AGE_HOUR_MS}>Under 1h old</option>
+          <option value={AGE_DAY_MS}>Under 1d old</option>
+          <option value={AGE_WEEK_MS}>Under 1w old</option>
         </select>
         {chains.length < 2 ? null : (
           <select value={chain} onChange={(e) => setChain(e.target.value)} className={control}>
@@ -1154,8 +1209,6 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
             <span className="text-ink-ghost">gas</span>
           </label>
         )}
-
-        <WalletChip />
 
         {staleSince === null ? null : (
           <span

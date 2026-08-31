@@ -1,5 +1,6 @@
 import { cached, peekWithAge, remember } from '../cache'
 import { fetchTopPools, fetchWalletPositions } from '../clients/krystal'
+import { withBudget } from './budget'
 import { fetchActivity, type ActivityTarget } from '../clients/uniswap'
 import {
   ACTIVITY_CACHE_TTL_MS,
@@ -10,6 +11,7 @@ import {
   krystalPoolUrl,
   trackedWallets,
   uniswapPoolUrl,
+  ACTIVITY_EAGER_BUDGET_MS,
 } from '../config'
 import type { Activity, KrystalPool, PoolRow, PositionState } from '../types'
 import {
@@ -24,8 +26,9 @@ import {
 import { rankPools } from './rank'
 import { rankByScore, scorePools, type ScoreWeights } from './score'
 import { recentFeeRate } from './feeWindow'
-import { estimatePoolAge } from './poolAge'
+import { estimatePoolAge, poolAgeSpanMs } from './poolAge'
 import { getFirstSeen } from './alertWatcher'
+import { isStockPool } from './stockTokens'
 
 const ZERO_HOOK = '0x0000000000000000000000000000000000000000'
 
@@ -56,6 +59,12 @@ export type PoolsSnapshot = {
   fetchedAt: string
 }
 
+/** Whether a feed pool holds an issued equity on either side. */
+export const buildStockFlag = (pool: {
+  token0: { address: string }
+  token1: { address: string }
+}): boolean => isStockPool({ token0Address: pool.token0.address, token1Address: pool.token1.address })
+
 /**
  * Flattens a Krystal pool into a table row.
  *
@@ -77,6 +86,13 @@ const toRow = (
     month: pool.stat30d.feeUsd,
   })
 
+  const volumeWindows = {
+    hour: pool.stat1h.volumeUsd,
+    day: pool.stat24h.volumeUsd,
+    week: pool.stat7d.volumeUsd,
+    month: pool.stat30d.volumeUsd,
+  }
+
   return {
     poolId: pool.poolAddress,
     chainId: pool.chainId,
@@ -92,6 +108,7 @@ const toRow = (
     hooks: pool.hooks,
     hasHook: Boolean(pool.hooks) && pool.hooks !== ZERO_HOOK,
     tag: pool.tag ?? '',
+    isStock: buildStockFlag(pool),
     tvlUsd: pool.tvlUsd,
     totalFeesUsd: pool.stat30d.feeUsd,
     recentFeesPerHourUsd: recent.perHourUsd,
@@ -108,15 +125,8 @@ const toRow = (
     positionHolders,
     krystalUrl: krystalPoolUrl(pool.chainId, pool.poolAddress, pool.protocol, pool.feeTier),
     uniswapUrl: uniswapPoolUrl(pool.chainId, pool.poolAddress),
-    age: estimatePoolAge(
-      {
-        hour: pool.stat1h.volumeUsd,
-        day: pool.stat24h.volumeUsd,
-        week: pool.stat7d.volumeUsd,
-        month: pool.stat30d.volumeUsd,
-      },
-      firstSeenAt,
-    ),
+    age: estimatePoolAge(volumeWindows, firstSeenAt),
+    ageMs: poolAgeSpanMs(volumeWindows, firstSeenAt),
     score: null,
     scoreParts: null,
   }
@@ -286,15 +296,25 @@ export const getPoolsSnapshot = async (): Promise<PoolsSnapshot> => {
   const candidates = rankByScore(scorePools(rows, PRESELECT_WEIGHTS)).slice(0, ACTIVITY_POOL_LIMIT)
 
   let activity = new Map<string, Activity>()
-  try {
-    // Goes through the same cache-first path the route uses, so the eager pass and the browser
-    // share measurements instead of each paying for its own.
-    const measured = await loadActivityFor(
-      candidates.map(({ poolId, protocol, chainId }) => ({ poolId, protocol, chainId })),
+  // Goes through the same cache-first path the route uses, so the eager pass and the browser
+  // share measurements instead of each paying for its own.
+  //
+  // Bounded by a deadline because measuring costs one request per pool: on a cold cache the full
+  // pass runs tens of seconds, and the page cannot render until it returns. Whatever lands in
+  // time is used; the rest keeps running into the shared cache, and the table's own sweep fills
+  // the gaps in the browser, so an overrun costs ranking accuracy on the first paint rather than
+  // the page itself.
+  const eagerActivity = await withBudget(
+    loadActivityFor(candidates.map(({ poolId, protocol, chainId }) => ({ poolId, protocol, chainId }))),
+    ACTIVITY_EAGER_BUDGET_MS,
+    null,
+  )
+  if (eagerActivity) {
+    activity = new Map(Object.entries(eagerActivity))
+  } else {
+    warnings.push(
+      'Trade rates were still loading, so the first ranking uses fees and TVL. They fill in as measurements arrive.',
     )
-    activity = new Map(Object.entries(measured))
-  } catch {
-    warnings.push('Could not load transaction rates. Ranking falls back to fees and TVL only.')
   }
 
   for (const row of rows) {

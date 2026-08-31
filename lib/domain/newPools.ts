@@ -57,6 +57,22 @@ export type AlertFilters = {
    * accumulates past it instead of creeping under the threshold forever.
    */
   minChangePercent: number
+  /** Whether a pool departing from its own recent volume is worth a message. */
+  spikeEnabled: boolean
+  /**
+   * How far above its trailing median an hour must run.
+   *
+   * Five, from replaying the rule over seven days of Uniswap data: every stock pool tested landed
+   * between 0.9 and 2.4 alerts a day. Eight roughly halves that.
+   */
+  spikeMultiple: number
+  /**
+   * Smallest hourly volume worth alerting on, in USD.
+   *
+   * Without a floor the thin stock pools fire three to four times a day, because they are new
+   * enough that ordinary growth clears any multiple against a trailing median.
+   */
+  spikeMinVolumeUsd: number
 }
 
 export const DEFAULT_FILTERS: AlertFilters = {
@@ -70,6 +86,9 @@ export const DEFAULT_FILTERS: AlertFilters = {
   reportChanges: false,
   monitoredPoolIds: [],
   minChangePercent: 10,
+  spikeEnabled: false,
+  spikeMultiple: 5,
+  spikeMinVolumeUsd: 100_000,
 }
 
 /**

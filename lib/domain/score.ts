@@ -76,10 +76,31 @@ export const percentileRanks = (values: number[]): number[] => {
   if (values.length === 0) return []
   if (values.length === 1) return [0.5]
 
+  // Sort once and read each distinct value's position, rather than rescanning the cohort for
+  // every element. The definition is unchanged; only the cost is, from quadratic to n log n.
+  // At the size the live feed returns, thousands of pools scored on five factors, the quadratic
+  // form ran for tens of seconds and held up the whole page.
+  const total = values.length
+  const sorted = [...values].sort((a, b) => a - b)
+
+  // Per distinct value: how many sort below it, and how many share it.
+  const placement = new Map<number, { below: number; equal: number }>()
+  let index = 0
+  while (index < total) {
+    const value = sorted[index]
+    // Starts one past `index` so a value that never compares equal to itself still advances.
+    let next = index + 1
+    while (next < total && sorted[next] === value) next += 1
+    placement.set(value, { below: index, equal: next - index })
+    index = next
+  }
+
   return values.map((value) => {
-    const below = values.filter((other) => other < value).length
-    const equal = values.filter((other) => other === value).length
-    return (below + equal / 2) / values.length
+    const spot = placement.get(value)
+    // Every value came from the same array, so a miss is unreachable; the midpoint keeps the
+    // function total rather than asserting.
+    if (!spot) return 0.5
+    return (spot.below + spot.equal / 2) / total
   })
 }
 

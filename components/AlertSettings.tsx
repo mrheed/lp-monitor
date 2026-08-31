@@ -203,6 +203,36 @@ export const AlertSettings = ({
         </Field>
       </AlertGroup>
 
+      <AlertGroup
+        name="Volume spikes"
+        enabled={filters.spikeEnabled}
+        onToggle={(spikeEnabled) => onChange({ ...filters, spikeEnabled })}
+        disabled={unavailable}
+        note={
+          'Watches the stock pools only, comparing each hour against that pool’s own trailing ' +
+          'median. Starring pools for change reports narrows spikes to those pools too. Five ' +
+          'times over a $100k hourly floor sent roughly one to two messages per pool per day ' +
+          'across a seven day sample; raising the multiple to eight roughly halves that.'
+        }
+      >
+        <Field label="Spike multiple">
+          <NumberField
+            value={filters.spikeMultiple}
+            onChange={(spikeMultiple) => onChange({ ...filters, spikeMultiple })}
+            suffix="x"
+            step={0.5}
+          />
+        </Field>
+        <Field label="Ignore hours under">
+          <NumberField
+            value={filters.spikeMinVolumeUsd}
+            onChange={(spikeMinVolumeUsd) => onChange({ ...filters, spikeMinVolumeUsd })}
+            suffix="$/h"
+            step={10_000}
+          />
+        </Field>
+      </AlertGroup>
+
       {/* Mention drives both features, so it sits under both rather than inside either. */}
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-line pt-3 text-sm">
         <span className="w-full shrink-0 text-ink0 sm:w-36">Mention</span>

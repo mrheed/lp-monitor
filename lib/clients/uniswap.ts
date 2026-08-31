@@ -7,6 +7,16 @@ import type { Activity } from '../types'
 const ENDPOINT =
   'https://entry-gateway.backend-prod.api.uniswap.org/data.v2.DataApiService/ListTransactions'
 
+/** Headers the Uniswap web app sends. The gateway rejects requests without them. */
+const GATEWAY_HEADERS = {
+  accept: '*/*',
+  'content-type': 'application/json',
+  'connect-protocol-version': '1',
+  origin: 'https://app.uniswap.org',
+  referer: 'https://app.uniswap.org/',
+  'x-request-source': 'uniswap-web',
+}
+
 const transactionSchema = z.object({
   poolId: z.string().default(''),
   timestampMs: z.string(),
@@ -18,6 +28,11 @@ const transactionSchema = z.object({
 
 const listTransactionsSchema = z.object({
   transactions: z.array(transactionSchema).default([]),
+})
+
+const swapPageSchema = z.object({
+  transactions: z.array(transactionSchema).default([]),
+  page: z.object({ nextPageToken: z.string().optional() }).optional(),
 })
 
 /** A pool to measure, carrying the chain and protocol its id belongs to. */
@@ -38,6 +53,81 @@ export const protocolVersionFor = (protocol: string) => {
   return 'PROTOCOL_VERSION_V4'
 }
 
+/** One swap as the volume history cares about it: when, how much, and by whom. */
+export type PoolSwap = {
+  timestampMs: number
+  amountUsd: number
+  walletAddress: string
+}
+
+/**
+ * A page token that starts the feed at a point in time and reads backwards from it.
+ *
+ * The feed's own token is base64 JSON carrying a `(timestampMs, globalSequenceNumber)` cursor.
+ * Supplying a maximal sequence number seeks to the requested instant, which is what makes a
+ * backfill affordable: a pool running a hundred swaps every three minutes would otherwise need
+ * thousands of sequential pages to reach yesterday.
+ *
+ * This relies on an undocumented encoding, so only the backfill uses it. Live sampling reads the
+ * newest page and needs no cursor, and keeps working if this ever stops being accepted.
+ */
+export const seekPageToken = (timestampMs: number, chainId: number): string =>
+  btoa(
+    JSON.stringify({
+      timestampMs,
+      chainId,
+      globalSequenceNumber: '999999999999999999999999999',
+    }),
+  )
+
+/**
+ * Reads one page of swaps for a pool.
+ *
+ * Liquidity adds and removes are dropped: the feed mixes all three event types and only swaps
+ * are volume. Amounts are taken as magnitudes because the feed signs them by direction.
+ *
+ * The response is filtered back to the requested pool for the same reason
+ * {@link fetchActivity} does it: the API accepts a pool filter and can still answer with the
+ * chain wide firehose, so a response that looks right may describe twenty other pools.
+ */
+export const fetchPoolSwaps = async (
+  { poolId, protocol, chainId }: ActivityTarget,
+  options: { pageSize?: number; pageToken?: string } = {},
+): Promise<{ swaps: PoolSwap[]; nextPageToken: string | null }> => {
+  const { pageSize = 100, pageToken } = options
+
+  const response = await fetch(ENDPOINT, {
+    method: 'POST',
+    headers: GATEWAY_HEADERS,
+    body: JSON.stringify({
+      chainIds: [chainId],
+      filter: { protocolVersions: [protocolVersionFor(protocol)], poolId },
+      page: { pageSize, ...(pageToken ? { pageToken } : {}) },
+    }),
+    cache: 'no-store',
+  })
+
+  if (!response.ok) throw new Error(`Uniswap swap request failed: ${response.status}`)
+
+  const parsed = swapPageSchema.parse(await response.json())
+  const wanted = poolId.toLowerCase()
+
+  const swaps = parsed.transactions
+    .filter(
+      (entry) =>
+        entry.poolId.toLowerCase() === wanted &&
+        entry.eventType === 'TRANSACTION_EVENT_TYPE_SWAP',
+    )
+    .map((entry) => ({
+      timestampMs: Number(entry.timestampMs),
+      amountUsd: Math.abs(entry.amountUsd ?? 0),
+      walletAddress: entry.walletAddress ?? '',
+    }))
+    .filter((swap) => Number.isFinite(swap.timestampMs))
+
+  return { swaps, nextPageToken: parsed.page?.nextPageToken ?? null }
+}
+
 /**
  * Fetches one page of transactions for a single pool.
  *
@@ -52,14 +142,7 @@ const fetchPoolTransactions = async (
 ): Promise<ActivitySample[]> => {
   const response = await fetch(ENDPOINT, {
     method: 'POST',
-    headers: {
-      accept: '*/*',
-      'content-type': 'application/json',
-      'connect-protocol-version': '1',
-      origin: 'https://app.uniswap.org',
-      referer: 'https://app.uniswap.org/',
-      'x-request-source': 'uniswap-web',
-    },
+    headers: GATEWAY_HEADERS,
     body: JSON.stringify({
       chainIds: [chainId],
       filter: { protocolVersions: [protocolVersionFor(protocol)], poolId },

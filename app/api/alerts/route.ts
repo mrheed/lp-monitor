@@ -14,6 +14,11 @@ const filtersSchema = z.object({
   reportChanges: z.boolean(),
   monitoredPoolIds: z.array(z.string()).max(200),
   minChangePercent: z.number().min(0).max(1000),
+  spikeEnabled: z.boolean(),
+  // Bounded like the sibling fields above: a multiple past a thousand never fires, and a floor
+  // past a billion an hour silences the alert outright. Both would be a typo, not a setting.
+  spikeMultiple: z.number().min(1).max(1000),
+  spikeMinVolumeUsd: z.number().min(0).max(1_000_000_000),
 })
 
 /**

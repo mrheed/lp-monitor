@@ -95,6 +95,8 @@ export type PoolRow = {
   hooks: string
   hasHook: boolean
   tag: string
+  /** Whether either side is one of the tokenized equities Robinhood issued on this chain. */
+  isStock: boolean
   tvlUsd: number
   /** Accumulated fees over the widest window available. Shown, never scored. */
   totalFeesUsd: number
@@ -126,6 +128,8 @@ export type PoolRow = {
   uniswapUrl: string
   /** How far back the pool's recorded activity extends, as a label like `3h` or `1w`. */
   age: string
+  /** The same age as a numeric millisecond span, for filtering and sorting. */
+  ageMs: number
   /** Composite 0..1 rank across fee rate, thinness, trade rate, traders and calmness. */
   score: number | null
   scoreParts: {

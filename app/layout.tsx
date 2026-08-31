@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import type { ReactNode } from 'react'
 import '@rainbow-me/rainbowkit/styles.css'
 import './globals.css'
+import { Navbar } from '@/components/Navbar'
 import { Providers } from './providers'
 
 export const metadata: Metadata = {
@@ -12,7 +13,10 @@ export const metadata: Metadata = {
 const RootLayout = ({ children }: { children: ReactNode }) => (
   <html lang="en">
     <body>
-      <Providers>{children}</Providers>
+      <Providers>
+        <Navbar />
+        {children}
+      </Providers>
     </body>
   </html>
 )

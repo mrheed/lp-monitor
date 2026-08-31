@@ -9,7 +9,7 @@ import {
   walletConnectWallet,
 } from '@rainbow-me/rainbowkit/wallets'
 import { createConfig, http, type Transport } from 'wagmi'
-import { arbitrum, base, mainnet, optimism, polygon } from 'wagmi/chains'
+import { arbitrum, base, bsc, mainnet, optimism, polygon } from 'wagmi/chains'
 import { defineChain, type Chain } from 'viem'
 
 /**
@@ -32,8 +32,8 @@ export const robinhoodChain = defineChain({
   },
 })
 
-/** The same six chains the tracker follows, Robinhood first as the primary. */
-const chains = [robinhoodChain, mainnet, base, arbitrum, optimism, polygon] as const satisfies readonly [Chain, ...Chain[]]
+/** The tracker's chains plus BSC, where the v4 hook deploys. Robinhood stays primary. */
+const chains = [robinhoodChain, bsc, mainnet, base, arbitrum, optimism, polygon] as const satisfies readonly [Chain, ...Chain[]]
 
 const transports = Object.fromEntries(
   chains.map((chain) => [chain.id, http()]),

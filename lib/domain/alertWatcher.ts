@@ -10,6 +10,11 @@ import {
   ALERT_POLL_INTERVAL_MS,
   TX_SAMPLE_SIZE_WATCHED,
 } from '../config'
+import { HOUR_MS } from './volumeHistory'
+import { sampleStockVolume } from './volumeSampler'
+import { detectSpike, type Spike } from './volumeSpike'
+import type { VolumeHistory } from './volumeStore'
+import { composeSpikeMessage } from './spikeMessage'
 import {
   BASELINE,
   HISTORY_LIMIT,
@@ -38,7 +43,7 @@ import {
   type PoolMetrics,
 } from './poolChanges'
 import { getPoolsSnapshot, loadActivityFor } from './pools'
-import type { Activity } from '../types'
+import type { Activity, PoolRow } from '../types'
 
 /** What the UI can see about the watcher without being able to drive it. */
 export type AlertStatus = {
@@ -92,6 +97,8 @@ type WatcherState = {
   messageIds: { newPool: number | null; change: number | null }
   /** Pools announced since the new-pool message was first posted, for its running total. */
   announcedInMessage: number
+  /** When each pool last had a spike alerted, so one event does not alert on every poll. */
+  spikeAlertedAt: Record<string, number>
 }
 
 const FRESH: () => WatcherState = () => ({
@@ -114,6 +121,7 @@ const FRESH: () => WatcherState = () => ({
   reportedSignature: null,
   messageIds: { newPool: null, change: null },
   announcedInMessage: 0,
+  spikeAlertedAt: {},
 })
 
 /**
@@ -156,6 +164,7 @@ const restore = () => {
   state.lastReportAt = saved.lastReportAt
   state.messageIds = saved.messageIds
   state.announcedInMessage = saved.announcedInMessage
+  state.spikeAlertedAt = saved.spikeAlertedAt
 
   // Sightings are a separate file because they are a cache of what the chain looked like, not a
   // record of anything sent. Losing them costs age precision and nothing else.
@@ -173,6 +182,7 @@ const persist = () => {
     lastReportAt: state.lastReportAt,
     messageIds: state.messageIds,
     announcedInMessage: state.announcedInMessage,
+    spikeAlertedAt: state.spikeAlertedAt,
   })
   saveSightings({ firstSeen: Object.fromEntries(state.firstSeen) })
 }
@@ -245,6 +255,39 @@ const replaceMessage = async (kind: 'newPool' | 'change', text: string): Promise
   if (previous !== null) await deleteTelegramMessage(previous)
 }
 
+/** Clears the failure state and holds the next send off for the minimum interval. */
+const sendAccepted = () => {
+  state.lastError = null
+  state.consecutiveFailures = 0
+  state.nextAttemptAt = Date.now() + ALERT_MIN_SEND_INTERVAL_MS
+}
+
+/**
+ * Records a rejected send and when another may be attempted, returning the reason it recorded.
+ *
+ * The throttle previously counted successes only, so a rejected send was retried on the very
+ * next poll and kept earning the same rejection. A 429 states how long to wait, which is
+ * authoritative; otherwise back off geometrically to a ceiling.
+ */
+const sendRejected = (error: unknown): string => {
+  const reason = error instanceof Error ? error.message : 'Unknown error'
+
+  state.lastError = reason
+  state.consecutiveFailures += 1
+
+  const requested =
+    error instanceof TelegramError && error.retryAfterSeconds !== null
+      ? error.retryAfterSeconds * 1_000
+      : 0
+  const backoff = Math.min(
+    ALERT_MIN_SEND_INTERVAL_MS * 2 ** (state.consecutiveFailures - 1),
+    ALERT_MAX_BACKOFF_MS,
+  )
+
+  state.nextAttemptAt = Date.now() + Math.max(requested, backoff)
+  return reason
+}
+
 /**
  * Announces one batch, and records the pools only if Telegram accepted it.
  *
@@ -271,31 +314,64 @@ const announce = async () => {
 
     state.lastSentAt = Date.now()
     state.lastSentCount = batch.length
-    state.lastError = null
-    state.consecutiveFailures = 0
-    state.nextAttemptAt = Date.now() + ALERT_MIN_SEND_INTERVAL_MS
+    sendAccepted()
     log(`sent ${batch.length} new pool${batch.length === 1 ? '' : 's'}, ${state.pending.length} queued`)
     record(toRecord(batch, state.filters.mentions, { status: 'sent' }))
   } catch (error) {
     // Left in `pending` and out of `known`, so the same pools are tried again later.
-    state.lastError = error instanceof Error ? error.message : 'Unknown error'
-    state.consecutiveFailures += 1
+    const reason = sendRejected(error)
+    log(`new pool alert failed: ${reason}`)
+    record(toRecord(batch, state.filters.mentions, { status: 'failed', error: reason }))
+  }
 
-    // The throttle previously counted successes only, so a rejected send was retried on the very
-    // next poll and kept earning the same rejection. A 429 states how long to wait, which is
-    // authoritative; otherwise back off geometrically to a ceiling.
-    const requested =
-      error instanceof TelegramError && error.retryAfterSeconds !== null
-        ? error.retryAfterSeconds * 1_000
-        : 0
-    const backoff = Math.min(
-      ALERT_MIN_SEND_INTERVAL_MS * 2 ** (state.consecutiveFailures - 1),
-      ALERT_MAX_BACKOFF_MS,
-    )
+  persist()
+}
 
-    state.nextAttemptAt = Date.now() + Math.max(requested, backoff)
-    log(`new pool alert failed: ${state.lastError}`)
-    record(toRecord(batch, state.filters.mentions, { status: 'failed', error: state.lastError }))
+/**
+ * Sends one message for whatever stock pool spiked, from volume history sampled elsewhere.
+ *
+ * Sampling is not this function's job: `pollOnce` samples every poll, unconditionally, because
+ * the stocks page charts that same history whether or not alerts are on. This function only
+ * decides what is worth sending from it, so its guards gate the message, not the measurement.
+ */
+const reportSpikes = async (rows: PoolRow[], history: VolumeHistory): Promise<void> => {
+  const { spikeEnabled, spikeMultiple, spikeMinVolumeUsd, monitoredPoolIds, mentions } =
+    state.filters
+
+  if (!spikeEnabled || !telegramConfigured()) return
+
+  // Spikes queue behind the same throttle as every other alert, rather than sending directly.
+  // This gate keeps spike sends inside the shared backoff window, respecting nextAttemptAt.
+  if (Date.now() < state.nextAttemptAt) return
+
+  const watched = new Set(monitoredPoolIds.map((id) => id.toLowerCase()))
+
+  const settings = {
+    multiple: spikeMultiple,
+    minVolumeUsd: spikeMinVolumeUsd,
+    cooldownMs: 2 * HOUR_MS,
+  }
+
+  const spikes: Spike[] = []
+
+  for (const [poolId, buckets] of Object.entries(history)) {
+    if (watched.size > 0 && !watched.has(poolId)) continue
+
+    const spike = detectSpike(poolId, buckets, settings, state.spikeAlertedAt[poolId] ?? null)
+    if (spike !== null) spikes.push(spike)
+  }
+
+  if (spikes.length === 0) return
+
+  const labels = Object.fromEntries(rows.map((row) => [row.poolId.toLowerCase(), row.pair]))
+
+  try {
+    await sendTelegramMessage(composeSpikeMessage(spikes, labels, mentions))
+    for (const spike of spikes) state.spikeAlertedAt[spike.poolId] = spike.atMs
+    sendAccepted()
+    log(`sent ${spikes.length} volume spike${spikes.length === 1 ? '' : 's'}`)
+  } catch (error) {
+    log(`spike alert failed: ${sendRejected(error)}`)
   }
 
   persist()
@@ -366,6 +442,17 @@ export const pollOnce = async (): Promise<void> => {
 
     if (state.filters.enabled && telegramConfigured()) await announce()
     await reportChanges(candidates, rows)
+
+    // Sampled unconditionally: the stocks page charts this history whether or not alerts are on.
+    // Given its own try/catch so a sampling failure cannot read as a poll failure or skip the
+    // spike check outright; an empty history simply means nothing to alert on this pass.
+    let volume: VolumeHistory = {}
+    try {
+      volume = await sampleStockVolume(rows)
+    } catch (error) {
+      log(`stock volume sample failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
+    await reportSpikes(rows, volume)
   } catch (error) {
     state.lastError = error instanceof Error ? error.message : 'Unknown error'
     log(`poll failed: ${state.lastError}`)
