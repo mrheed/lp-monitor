@@ -56,6 +56,13 @@ export type AlertState = {
    */
   messageIds: { newPool: number | null; change: number | null }
   announcedInMessage: number
+  /**
+   * When each pool last had a spike alerted.
+   *
+   * Persisted for the same reason `reported` is: losing it on restart re-fires every spike still
+   * inside its cooldown window.
+   */
+  spikeAlertedAt: Record<string, number>
 }
 
 /**
@@ -90,6 +97,7 @@ const EMPTY: AlertState = {
   lastReportAt: null,
   messageIds: { newPool: null, change: null },
   announcedInMessage: 0,
+  spikeAlertedAt: {},
 }
 
 /** Reads a JSON file, yielding null rather than throwing on anything unreadable. */
@@ -148,6 +156,14 @@ export const interpretAlertState = (record: Record<string, unknown> | null): Ale
     },
     announcedInMessage:
       typeof record.announcedInMessage === 'number' ? record.announcedInMessage : 0,
+    spikeAlertedAt:
+      typeof record.spikeAlertedAt === 'object' && record.spikeAlertedAt !== null
+        ? Object.fromEntries(
+            Object.entries(record.spikeAlertedAt).filter(
+              ([, at]) => typeof at === 'number' && Number.isFinite(at),
+            ),
+          )
+        : {},
   }
 }
 

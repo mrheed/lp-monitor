@@ -14,6 +14,9 @@ const filtersSchema = z.object({
   reportChanges: z.boolean(),
   monitoredPoolIds: z.array(z.string()).max(200),
   minChangePercent: z.number().min(0).max(1000),
+  spikeEnabled: z.boolean(),
+  spikeMultiple: z.number().min(1),
+  spikeMinVolumeUsd: z.number().min(0),
 })
 
 /**
