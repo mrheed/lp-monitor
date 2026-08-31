@@ -1,5 +1,5 @@
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { BUCKET_LIMIT, type VolumeBucket } from './volumeHistory'
+import { BUCKET_LIMIT, isVolumeBucket, type VolumeBucket } from './volumeHistory'
 
 const HISTORY_FILE = '.volume-history.json'
 
@@ -22,15 +22,6 @@ export type VolumeStore = { history: VolumeHistory; backfill: BackfillLog }
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
-/** Whether a parsed value carries every bucket field as a finite number. */
-const isBucket = (value: unknown): value is VolumeBucket => {
-  if (!isRecord(value)) return false
-
-  return (['hourEndMs', 'volumeUsd', 'swaps', 'spanMs'] as const).every(
-    (key) => typeof value[key] === 'number' && Number.isFinite(value[key]),
-  )
-}
-
 /** Whether a parsed value carries both attempt fields as finite numbers. */
 const isAttempt = (value: unknown): value is BackfillAttempt => {
   if (!isRecord(value)) return false
@@ -50,7 +41,7 @@ const interpretHistory = (record: unknown): VolumeHistory => {
     if (!Array.isArray(value)) continue
 
     const buckets = value
-      .filter(isBucket)
+      .filter(isVolumeBucket)
       .sort((a, b) => a.hourEndMs - b.hourEndMs)
       .slice(-BUCKET_LIMIT)
 

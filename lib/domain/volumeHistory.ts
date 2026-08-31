@@ -24,6 +24,21 @@ export type VolumeBucket = {
   spanMs: number
 }
 
+/**
+ * Whether a parsed value carries every bucket field as a finite number.
+ *
+ * Lives here rather than in the store because both sides of the wire need it: the store validates
+ * what it read from disk, and the browser validates what the volume route sent back.
+ */
+export const isVolumeBucket = (value: unknown): value is VolumeBucket => {
+  if (typeof value !== 'object' || value === null) return false
+
+  const candidate: Record<string, unknown> = { ...value }
+  return (['hourEndMs', 'volumeUsd', 'swaps', 'spanMs'] as const).every(
+    (key) => typeof candidate[key] === 'number' && Number.isFinite(candidate[key]),
+  )
+}
+
 /** The hour boundary at or after `ms`, which is how a bucket is labelled. */
 export const alignHourEnd = (ms: number): number => Math.ceil(ms / HOUR_MS) * HOUR_MS
 
