@@ -341,7 +341,7 @@ const reportSpikes = async (rows: PoolRow[], history: VolumeHistory): Promise<vo
   if (!spikeEnabled || !telegramConfigured()) return
 
   // Spikes queue behind the same throttle as every other alert, rather than sending directly.
-  // Without it a poll could emit two messages, and a rejected send was retried every minute.
+  // This gate keeps spike sends inside the shared backoff window, respecting nextAttemptAt.
   if (Date.now() < state.nextAttemptAt) return
 
   const watched = new Set(monitoredPoolIds.map((id) => id.toLowerCase()))

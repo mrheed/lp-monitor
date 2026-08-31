@@ -16,6 +16,21 @@ describe('overlayFor', () => {
   it('yields null for a pool with no history sampled yet', () => {
     expect(overlayFor({ '0xabc': buckets }, '0xdef')).toBeNull()
   })
+
+  it('filters out buckets that span more than an hour', () => {
+    const validBucket = { hourEndMs: HOUR, volumeUsd: 100, swaps: 5, spanMs: HOUR }
+    const tooLongBucket = { hourEndMs: 2 * HOUR, volumeUsd: 200, swaps: 10, spanMs: 2 * HOUR }
+    const history = { '0xabc': [validBucket, tooLongBucket] }
+
+    expect(overlayFor(history, '0xabc')).toEqual([validBucket])
+  })
+
+  it('yields null when all buckets are filtered out', () => {
+    const tooLongBucket = { hourEndMs: HOUR, volumeUsd: 100, swaps: 5, spanMs: 2 * HOUR }
+    const history = { '0xabc': [tooLongBucket] }
+
+    expect(overlayFor(history, '0xabc')).toBeNull()
+  })
 })
 
 describe('readVolumePayload', () => {

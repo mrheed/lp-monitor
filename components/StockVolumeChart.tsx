@@ -45,8 +45,11 @@ export const chartGeometry = (
     })
     .join(' ')
 
-  // A single bucket spans no time, so its hour is the whole chart.
-  return { points, max, xs, hourWidth: rangeMs > 0 ? (HOUR_MS / rangeMs) * width : width }
+  // A single bucket has no time span to base the calculation on, so assume it represents one hour
+  // and scale to a sensible fraction of the chart width. Multi-bucket spans use the actual time range.
+  const hourWidth =
+    rangeMs > 0 ? (HOUR_MS / rangeMs) * width : Math.max(Math.round(width / 20), 1)
+  return { points, max, xs, hourWidth }
 }
 
 /** Hour label in US Eastern, where the underlying equities trade. */

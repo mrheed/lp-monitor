@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { StockVolumeChart } from './StockVolumeChart'
-import { isVolumeBucket, type VolumeBucket } from '@/lib/domain/volumeHistory'
+import { hourlyReadings, isVolumeBucket, type VolumeBucket } from '@/lib/domain/volumeHistory'
 import type { VolumeHistory } from '@/lib/domain/volumeStore'
 
 /** How often the panel re-reads the history. The watcher samples once a minute. */
@@ -11,11 +11,17 @@ const VOLUME_POLL_MS = 60_000
 /** What the chart draws: the total across pools, and each pool's own series. */
 type VolumeSeries = { aggregate: VolumeBucket[]; byPool: VolumeHistory }
 
-/** One pool's series, or null when nothing is selected or the pool has not been sampled. */
+/** One pool's series filtered to hourly readings, or null when nothing is selected, the pool has not been sampled, or all buckets were filtered out. */
 export const overlayFor = (
   byPool: VolumeHistory,
   poolId: string | null,
-): VolumeBucket[] | null => (poolId === null ? null : (byPool[poolId.toLowerCase()] ?? null))
+): VolumeBucket[] | null => {
+  if (poolId === null) return null
+  const buckets = byPool[poolId.toLowerCase()]
+  if (buckets === undefined) return null
+  const filtered = hourlyReadings(buckets)
+  return filtered.length > 0 ? filtered : null
+}
 
 /** Every bucket in a parsed array, or null if any of them is not a bucket. */
 const readSeries = (value: unknown): VolumeBucket[] | null => {
