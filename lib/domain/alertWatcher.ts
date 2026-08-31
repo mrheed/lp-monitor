@@ -255,6 +255,39 @@ const replaceMessage = async (kind: 'newPool' | 'change', text: string): Promise
   if (previous !== null) await deleteTelegramMessage(previous)
 }
 
+/** Clears the failure state and holds the next send off for the minimum interval. */
+const sendAccepted = () => {
+  state.lastError = null
+  state.consecutiveFailures = 0
+  state.nextAttemptAt = Date.now() + ALERT_MIN_SEND_INTERVAL_MS
+}
+
+/**
+ * Records a rejected send and when another may be attempted, returning the reason it recorded.
+ *
+ * The throttle previously counted successes only, so a rejected send was retried on the very
+ * next poll and kept earning the same rejection. A 429 states how long to wait, which is
+ * authoritative; otherwise back off geometrically to a ceiling.
+ */
+const sendRejected = (error: unknown): string => {
+  const reason = error instanceof Error ? error.message : 'Unknown error'
+
+  state.lastError = reason
+  state.consecutiveFailures += 1
+
+  const requested =
+    error instanceof TelegramError && error.retryAfterSeconds !== null
+      ? error.retryAfterSeconds * 1_000
+      : 0
+  const backoff = Math.min(
+    ALERT_MIN_SEND_INTERVAL_MS * 2 ** (state.consecutiveFailures - 1),
+    ALERT_MAX_BACKOFF_MS,
+  )
+
+  state.nextAttemptAt = Date.now() + Math.max(requested, backoff)
+  return reason
+}
+
 /**
  * Announces one batch, and records the pools only if Telegram accepted it.
  *
@@ -281,31 +314,14 @@ const announce = async () => {
 
     state.lastSentAt = Date.now()
     state.lastSentCount = batch.length
-    state.lastError = null
-    state.consecutiveFailures = 0
-    state.nextAttemptAt = Date.now() + ALERT_MIN_SEND_INTERVAL_MS
+    sendAccepted()
     log(`sent ${batch.length} new pool${batch.length === 1 ? '' : 's'}, ${state.pending.length} queued`)
     record(toRecord(batch, state.filters.mentions, { status: 'sent' }))
   } catch (error) {
     // Left in `pending` and out of `known`, so the same pools are tried again later.
-    state.lastError = error instanceof Error ? error.message : 'Unknown error'
-    state.consecutiveFailures += 1
-
-    // The throttle previously counted successes only, so a rejected send was retried on the very
-    // next poll and kept earning the same rejection. A 429 states how long to wait, which is
-    // authoritative; otherwise back off geometrically to a ceiling.
-    const requested =
-      error instanceof TelegramError && error.retryAfterSeconds !== null
-        ? error.retryAfterSeconds * 1_000
-        : 0
-    const backoff = Math.min(
-      ALERT_MIN_SEND_INTERVAL_MS * 2 ** (state.consecutiveFailures - 1),
-      ALERT_MAX_BACKOFF_MS,
-    )
-
-    state.nextAttemptAt = Date.now() + Math.max(requested, backoff)
-    log(`new pool alert failed: ${state.lastError}`)
-    record(toRecord(batch, state.filters.mentions, { status: 'failed', error: state.lastError }))
+    const reason = sendRejected(error)
+    log(`new pool alert failed: ${reason}`)
+    record(toRecord(batch, state.filters.mentions, { status: 'failed', error: reason }))
   }
 
   persist()
@@ -323,6 +339,10 @@ const reportSpikes = async (rows: PoolRow[], history: VolumeHistory): Promise<vo
     state.filters
 
   if (!spikeEnabled || !telegramConfigured()) return
+
+  // Spikes queue behind the same throttle as every other alert, rather than sending directly.
+  // Without it a poll could emit two messages, and a rejected send was retried every minute.
+  if (Date.now() < state.nextAttemptAt) return
 
   const watched = new Set(monitoredPoolIds.map((id) => id.toLowerCase()))
 
@@ -348,10 +368,13 @@ const reportSpikes = async (rows: PoolRow[], history: VolumeHistory): Promise<vo
   try {
     await sendTelegramMessage(composeSpikeMessage(spikes, labels, mentions))
     for (const spike of spikes) state.spikeAlertedAt[spike.poolId] = spike.atMs
-    persist()
+    sendAccepted()
+    log(`sent ${spikes.length} volume spike${spikes.length === 1 ? '' : 's'}`)
   } catch (error) {
-    log(`spike alert failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    log(`spike alert failed: ${sendRejected(error)}`)
   }
+
+  persist()
 }
 
 /**

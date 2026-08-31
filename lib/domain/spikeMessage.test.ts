@@ -6,7 +6,7 @@ const spike = {
   rateUsdPerHour: 900_000,
   baselineUsdPerHour: 100_000,
   multiple: 9,
-  atMs: 1_788_109_384_000,
+  atMs: Date.UTC(2026, 0, 2, 19, 0, 0),
 }
 
 describe('composeSpikeMessage', () => {
@@ -17,6 +17,11 @@ describe('composeSpikeMessage', () => {
     expect(text).toContain('9.0x')
     expect(text).toContain('$900k/h')
     expect(text).toContain('$100k/h')
+  })
+
+  it('names the hour, since a stale pool alerts long after the hour it spiked in', () => {
+    // 19:00 UTC is 14:00 in New York in January, where the underlying equities trade.
+    expect(composeSpikeMessage([spike], { '0xabc': 'WETH/NVDA' }, [])).toContain('14:00 ET')
   })
 
   it('falls back to the pool id when no pair is known', () => {
