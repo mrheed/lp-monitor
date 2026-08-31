@@ -6,6 +6,7 @@ import { WalletChip } from './WalletChip'
 
 const LINKS = [
   { href: '/', label: 'Pools' },
+  { href: '/stocks', label: 'Stocks' },
   { href: '/safety', label: 'Safety check' },
   { href: '/deploy', label: 'Deploy hook' },
 ] as const
