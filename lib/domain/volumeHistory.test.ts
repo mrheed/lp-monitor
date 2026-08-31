@@ -10,6 +10,7 @@ import {
   mergeBucket,
   poolSeries,
   rateUsdPerHour,
+  sumSeries,
   shareOfTotal,
 } from './volumeHistory'
 
@@ -171,5 +172,32 @@ describe('poolSeries', () => {
     const smeared = { hourEndMs: HOUR_MS, volumeUsd: 10, swaps: 5, spanMs: 6 * HOUR_MS }
 
     expect(poolSeries({ '0xabc': [smeared] }, '0xabc')).toBeNull()
+  })
+})
+
+describe('sumSeries', () => {
+  it('adds values sharing an interval without scaling them', () => {
+    const day = 24 * HOUR_MS
+    const a = [{ hourEndMs: day, volumeUsd: 100, swaps: 0, spanMs: day }]
+    const b = [{ hourEndMs: day, volumeUsd: 50, swaps: 0, spanMs: day }]
+
+    expect(sumSeries([a, b])).toEqual([{ hourEndMs: day, volumeUsd: 150, swaps: 0, spanMs: day }])
+  })
+
+  it('keeps the step rather than forcing everything to an hour', () => {
+    const day = 24 * HOUR_MS
+
+    expect(sumSeries([[{ hourEndMs: day, volumeUsd: 1, swaps: 0, spanMs: day }]])[0].spanMs).toBe(day)
+  })
+
+  it('unions intervals the series do not share, ordered oldest first', () => {
+    const a = [{ hourEndMs: 2 * HOUR_MS, volumeUsd: 1, swaps: 0, spanMs: HOUR_MS }]
+    const b = [{ hourEndMs: HOUR_MS, volumeUsd: 2, swaps: 0, spanMs: HOUR_MS }]
+
+    expect(sumSeries([a, b]).map((x) => x.hourEndMs)).toEqual([HOUR_MS, 2 * HOUR_MS])
+  })
+
+  it('is empty for no series at all', () => {
+    expect(sumSeries([])).toEqual([])
   })
 })

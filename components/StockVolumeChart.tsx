@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from 'react'
 import { HOUR_MS, type VolumeBucket } from '@/lib/domain/volumeHistory'
+import { rangeAxisFormat, type VolumeRange } from '@/lib/domain/volumeRanges'
 
 const PLOT_HEIGHT = 200
 /** A small multiple sits under the total, so it is shorter but keeps the same time axis. */
@@ -131,6 +132,8 @@ type Props = {
    * its own labelled axis instead, so its shape reads without its magnitude being overstated.
    */
   compact?: boolean
+  /** Sets how the time axis and the readout are worded. Hours for a day, dates for a month. */
+  range?: VolumeRange
 }
 
 /**
@@ -146,6 +149,7 @@ export const StockVolumeChart = ({
   selectedLabel,
   aggregateLabel = 'All stock pools',
   compact = false,
+  range = '1d',
 }: Props) => {
   const plotHeight = compact ? COMPACT_HEIGHT : PLOT_HEIGHT
   const [hovered, setHovered] = useState<{ index: number; leftPx: number } | null>(null)
@@ -339,7 +343,7 @@ export const StockVolumeChart = ({
                 textAnchor="middle"
                 className="fill-[var(--ink-ghost)] font-mono text-[10px] tabular-nums"
               >
-                {localParts(bar.bucket.hourEndMs - HOUR_MS, { hour: '2-digit', hour12: false })}
+                {localParts(bar.bucket.hourEndMs - bar.bucket.spanMs, rangeAxisFormat(range))}
               </text>
             ) : null,
           )}
@@ -355,13 +359,12 @@ export const StockVolumeChart = ({
             }}
           >
             <p className="whitespace-nowrap font-mono text-[10px] tabular-nums text-ink-ghost">
-              {localParts(active.bucket.hourEndMs - HOUR_MS, {
+              {localParts(active.bucket.hourEndMs - active.bucket.spanMs, {
                 month: 'short',
                 day: 'numeric',
-                hour: '2-digit',
-                hour12: false,
+                ...(active.bucket.spanMs <= HOUR_MS ? { hour: '2-digit', hour12: false } : {}),
               })}
-              :00 WIB
+              {active.bucket.spanMs <= HOUR_MS ? ':00 WIB' : ''}
             </p>
             <p className="mt-1 flex items-center gap-1.5 whitespace-nowrap text-[11px] text-ink">
               <span aria-hidden className="h-2 w-2 rounded-[1px] bg-[var(--chart-total)]" />

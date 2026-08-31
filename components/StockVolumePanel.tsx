@@ -4,6 +4,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { StockVolumeChart } from './StockVolumeChart'
 import { StockTable } from './StockTable'
 import { groupByStock } from '@/lib/domain/stockGroups'
+import {
+  DEFAULT_RANGE,
+  VOLUME_RANGES,
+  type VolumeRange,
+} from '@/lib/domain/volumeRanges'
 import type { PoolRow } from '@/lib/types'
 import {
   aggregateSeries,
@@ -12,9 +17,6 @@ import {
   type VolumeBucket,
   type VolumeHistory,
 } from '@/lib/domain/volumeHistory'
-
-/** How often the panel re-reads the history. The watcher samples once a minute. */
-const VOLUME_POLL_MS = 60_000
 
 /** What the chart draws: the total across pools, and each pool's own series. */
 type VolumeSeries = { aggregate: VolumeBucket[]; byPool: VolumeHistory }
@@ -77,21 +79,42 @@ export const StockVolumePanel = ({ aggregate, byPool, rows }: Props) => {
   // whole session however long it was left open.
   const [series, setSeries] = useState<VolumeSeries>({ aggregate, byPool })
 
-  useEffect(() => {
-    const read = () => {
-      void fetch('/api/volume')
-        .then((response) => (response.ok ? response.json() : null))
-        .then((payload) => {
-          const parsed = readVolumePayload(payload)
-          if (parsed !== null) setSeries(parsed)
-        })
-        .catch(() => undefined)
-    }
+  const [range, setRange] = useState<VolumeRange>(DEFAULT_RANGE)
+  const [loading, setLoading] = useState(false)
 
-    read()
-    const timer = setInterval(read, VOLUME_POLL_MS)
-    return () => clearInterval(timer)
-  }, [])
+  // Keyed on the pool set so a re-render with the same pools does not refetch, and on the range
+  // so switching it does.
+  const poolKey = useMemo(() => rows.map((row) => row.poolId).sort().join(','), [rows])
+
+  useEffect(() => {
+    if (rows.length === 0) return
+    let current = true
+    setLoading(true)
+
+    void fetch('/api/volume/series', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        range,
+        pools: rows.map(({ poolId, protocol, chainId }) => ({ poolId, protocol, chainId })),
+      }),
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload: unknown) => {
+        if (!current) return
+        const parsed = readVolumePayload(payload)
+        // A failed load leaves the last good series drawn rather than blanking the chart.
+        if (parsed !== null) setSeries(parsed)
+      })
+      .catch(() => undefined)
+      .finally(() => current && setLoading(false))
+
+    return () => {
+      current = false
+    }
+    // poolKey stands in for rows, which is a new array on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [poolKey, range])
 
   const groups = useMemo(() => groupByStock(rows), [rows])
 
@@ -119,15 +142,46 @@ export const StockVolumePanel = ({ aggregate, byPool, rows }: Props) => {
 
   return (
     <div className="space-y-3">
+      <div className="flex items-center gap-1">
+        {VOLUME_RANGES.map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            onClick={() => setRange(entry.id)}
+            aria-pressed={range === entry.id}
+            className={`border px-2.5 py-1 text-[10px] uppercase tracking-[0.12em] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
+              range === entry.id
+                ? 'border-line-strong text-ink'
+                : 'border-line text-ink-ghost hover:text-ink'
+            }`}
+          >
+            {entry.label}
+          </button>
+        ))}
+        {loading ? (
+          <span className="ml-2 text-[10px] uppercase tracking-[0.12em] text-ink-ghost">
+            reading
+          </span>
+        ) : null}
+      </div>
+
       <StockVolumeChart
         aggregate={series.aggregate}
         selected={overlay}
         selectedLabel={selected}
+        range={range}
       />
 
       {overlay !== null && selected !== null ? (
         <div>
-          <StockVolumeChart aggregate={overlay} selected={null} selectedLabel={null} aggregateLabel={selected} compact />
+          <StockVolumeChart
+            aggregate={overlay}
+            selected={null}
+            selectedLabel={null}
+            aggregateLabel={selected}
+            range={range}
+            compact
+          />
           <p className="mt-1.5 px-1 text-[11px] leading-relaxed text-ink-ghost">
             {selected} on its own scale, because it is {sharePercent === null ? 'a fraction of' : `${sharePercent}% of`}{' '}
             total stock volume over these hours and would otherwise be a sliver on the axis above.

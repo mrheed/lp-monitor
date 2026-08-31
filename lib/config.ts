@@ -249,3 +249,20 @@ export const VOLUME_BACKFILL_MAX_ATTEMPTS = 3
 
 /** The gap a pool waits after one failed backfill, multiplied by how many it has failed. */
 export const VOLUME_BACKFILL_RETRY_MS = 15 * 60_000
+
+/**
+ * Pool history requests in flight at once against Uniswap's volume API.
+ *
+ * One request covers a whole range for a pool, so a page of two hundred stock pools is two
+ * hundred requests rather than the thousands the per-hour swap sampler needed. Held well under
+ * the transaction gateway's own ceiling because both share an upstream.
+ */
+export const GRAPH_HISTORY_CONCURRENCY = 12
+
+/**
+ * How long a pool's history is reused.
+ *
+ * The shortest range moves in hourly steps, so a five minute cache is never more than a fraction
+ * of a step stale, and it turns a page reload from two hundred requests into none.
+ */
+export const GRAPH_HISTORY_TTL_MS = 5 * 60_000

@@ -179,3 +179,28 @@ export const poolSeries = (history: VolumeHistory, poolId: string): VolumeBucket
   const scaled = aggregateSeries({ [poolId.toLowerCase()]: buckets })
   return scaled.length > 0 ? scaled : null
 }
+
+/**
+ * Sums several series that share one step.
+ *
+ * Distinct from {@link aggregateSeries}, which scales each bucket to an hour first because the
+ * swap sampler produces buckets whose span is however long a page of trades happened to cover.
+ * History from the volume API arrives on a fixed step for the whole range, so the values are
+ * already comparable and scaling them would be wrong.
+ */
+export const sumSeries = (series: VolumeBucket[][]): VolumeBucket[] => {
+  const byEnd = new Map<number, VolumeBucket>()
+
+  for (const buckets of series)
+    for (const bucket of buckets) {
+      const existing = byEnd.get(bucket.hourEndMs)
+      byEnd.set(bucket.hourEndMs, {
+        hourEndMs: bucket.hourEndMs,
+        volumeUsd: (existing?.volumeUsd ?? 0) + bucket.volumeUsd,
+        swaps: (existing?.swaps ?? 0) + bucket.swaps,
+        spanMs: bucket.spanMs,
+      })
+    }
+
+  return [...byEnd.values()].sort((a, b) => a.hourEndMs - b.hourEndMs)
+}
