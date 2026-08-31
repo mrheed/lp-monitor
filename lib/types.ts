@@ -108,7 +108,10 @@ export type PoolRow = {
   /** Which window `recentFeesPerHourUsd` came from, for display. */
   recentFeeWindow: '1h' | '24h' | '7d' | '30d' | 'none'
   fees24hUsd: number
+  /** Volume per feed window. The stocks table reports all four side by side. */
+  volume1hUsd: number
   volume24hUsd: number
+  volume7dUsd: number
   volume30dUsd: number
   apr24h: number
   drawdown24h: number

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { StockVolumeChart } from './StockVolumeChart'
+import { StockTable } from './StockTable'
+import type { PoolRow } from '@/lib/types'
 import {
   hourlyReadings,
   isVolumeBucket,
@@ -66,7 +68,7 @@ export const readVolumePayload = (value: unknown): VolumeSeries | null => {
 type Props = {
   aggregate: VolumeBucket[]
   byPool: VolumeHistory
-  pools: { poolId: string; pair: string }[]
+  rows: PoolRow[]
 }
 
 /**
@@ -75,7 +77,7 @@ type Props = {
  * Only pools with sampled history are offered, since a chip that overlays nothing reads as a
  * broken control rather than an unsampled pool.
  */
-export const StockVolumePanel = ({ aggregate, byPool, pools }: Props) => {
+export const StockVolumePanel = ({ aggregate, byPool, rows }: Props) => {
   const [selected, setSelected] = useState<string | null>(null)
 
   // Seeded from the server render so the chart is drawn on first paint, then refreshed from the
@@ -100,39 +102,22 @@ export const StockVolumePanel = ({ aggregate, byPool, pools }: Props) => {
     return () => clearInterval(timer)
   }, [])
 
-  const selectable = pools.filter((pool) => series.byPool[pool.poolId.toLowerCase()] !== undefined)
-  const active = selectable.find((pool) => pool.poolId === selected) ?? null
+  const active = rows.find((row) => row.poolId === selected) ?? null
 
   return (
-    <div>
+    <div className="space-y-3">
       <StockVolumeChart
         aggregate={series.aggregate}
         selected={overlayFor(series.byPool, selected)}
         selectedLabel={active?.pair ?? null}
       />
 
-      {selectable.length > 0 ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {selectable.map((pool) => {
-            const on = pool.poolId === selected
-            return (
-              <button
-                key={pool.poolId}
-                type="button"
-                aria-pressed={on}
-                onClick={() => setSelected(on ? null : pool.poolId)}
-                className={`rounded border px-2 py-1 text-[11px] uppercase tracking-[0.12em] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
-                  on
-                    ? 'border-accent text-ink'
-                    : 'border-line text-ink-muted hover:border-line-strong hover:text-ink'
-                }`}
-              >
-                {pool.pair}
-              </button>
-            )
-          })}
-        </div>
-      ) : null}
+      <StockTable
+        rows={rows}
+        byPool={series.byPool}
+        selected={selected}
+        onSelect={setSelected}
+      />
     </div>
   )
 }

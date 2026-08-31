@@ -93,15 +93,25 @@ const money = (value: number): string => {
   return `$${Math.round(value)}`
 }
 
-const easternParts = (ms: number, options: Intl.DateTimeFormatOptions) =>
-  new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', ...options }).format(new Date(ms))
+/** Clock the reader is on. Axis labels and the hover readout are in their local hours. */
+const localParts = (ms: number, options: Intl.DateTimeFormatOptions) =>
+  new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jakarta', ...options }).format(new Date(ms))
 
-/** Hour of the day in US Eastern, where the underlying equities trade. */
-const easternHour = (ms: number): number => Number(easternParts(ms, { hour: 'numeric', hour12: false }))
-
-/** Whether an hour falls inside the US cash session. Used only to shade the background. */
+/**
+ * Whether an hour falls inside the US cash session.
+ *
+ * Detected in Eastern because that is where the session is defined, then drawn against a Jakarta
+ * axis. The two have to stay separate: reading 09:00 off the reader's own clock would shade the
+ * wrong seven hours.
+ */
 const inSession = (ms: number): boolean => {
-  const hour = easternHour(ms)
+  const hour = Number(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      hour: 'numeric',
+      hour12: false,
+    }).format(new Date(ms)),
+  )
   return hour >= 9 && hour < 16
 }
 
@@ -292,7 +302,7 @@ export const StockVolumeChart = ({ aggregate, selected, selectedLabel }: Props) 
                 textAnchor="middle"
                 className="fill-[var(--ink-ghost)] font-mono text-[10px] tabular-nums"
               >
-                {easternParts(bar.bucket.hourEndMs - HOUR_MS, { hour: '2-digit', hour12: false })}
+                {localParts(bar.bucket.hourEndMs - HOUR_MS, { hour: '2-digit', hour12: false })}
               </text>
             ) : null,
           )}
@@ -308,13 +318,13 @@ export const StockVolumeChart = ({ aggregate, selected, selectedLabel }: Props) 
             }}
           >
             <p className="whitespace-nowrap font-mono text-[10px] tabular-nums text-ink-ghost">
-              {easternParts(active.bucket.hourEndMs - HOUR_MS, {
+              {localParts(active.bucket.hourEndMs - HOUR_MS, {
                 month: 'short',
                 day: 'numeric',
                 hour: '2-digit',
                 hour12: false,
               })}
-              :00 ET
+              :00 WIB
             </p>
             <p className="mt-1 flex items-center gap-1.5 whitespace-nowrap text-[11px] text-ink">
               <span aria-hidden className="h-2 w-2 rounded-[1px] bg-[var(--chart-total)]" />
@@ -333,7 +343,7 @@ export const StockVolumeChart = ({ aggregate, selected, selectedLabel }: Props) 
       </div>
 
       <p className="border-t border-line px-4 py-2 text-[11px] leading-relaxed text-ink-ghost">
-        Hours run in US Eastern; shaded columns are the 09:30 to 16:00 cash session. Shown for
+        Hours run in Jakarta time; shaded columns are the US 09:30 to 16:00 cash session. Shown for
         orientation, not explanation: these pools trade around the clock.
       </p>
     </figure>

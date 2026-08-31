@@ -1,4 +1,3 @@
-import { PoolTable } from '@/components/PoolTable'
 import { StockVolumePanel } from '@/components/StockVolumePanel'
 import { getPoolsSnapshot } from '@/lib/domain/pools'
 import { STOCK_TOKEN_COUNT } from '@/lib/domain/stockTokens'
@@ -36,13 +35,10 @@ export const StocksSection = async () => {
         <StockVolumePanel
           aggregate={aggregate}
           byPool={byPool}
-          pools={stockRows.map(({ poolId, pair }) => ({ poolId, pair }))}
+          rows={stockRows}
         />
       </div>
 
-      <div className="mt-6 sm:mt-8">
-        <PoolTable initialRows={stockRows} />
-      </div>
     </>
   )
 }

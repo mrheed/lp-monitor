@@ -209,11 +209,12 @@ export const krystalPoolUrl = (
 /**
  * Stock pools sampled for volume history on each pass.
  *
- * The 214 stock pools are ordered by 24 hour volume and the top slice is sampled, because a pool
- * doing under a thousand dollars an hour cannot produce a spike that clears the alert floor and
- * charting it adds nothing.
+ * Set above the 196 stock pools the feed currently lists, so every row in the stocks table gets a
+ * chart rather than the busiest few. Steady state is one request per pool per poll: 196 requests
+ * a minute, about 3.3 a second, which sits under the sweep's own concurrency. A cold start costs
+ * far more because each unseen pool backfills 48 hours, and that is what `backfillDue` paces.
  */
-export const VOLUME_SAMPLE_POOL_LIMIT = 40
+export const VOLUME_SAMPLE_POOL_LIMIT = 250
 
 /** Swaps read per hourly sample. One page: enough to imply a rate, cheap enough to repeat. */
 export const VOLUME_SAMPLE_PAGE_SIZE = 100
