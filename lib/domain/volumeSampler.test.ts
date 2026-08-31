@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchPoolSwaps, seekPageToken } from '../clients/uniswap'
+import { VOLUME_BACKFILL_MAX_ATTEMPTS, VOLUME_BACKFILL_RETRY_MS } from '../config'
 import { HOUR_MS } from './volumeHistory'
-import { aggregateSeries, backfillPool } from './volumeSampler'
+import { aggregateSeries, backfillPool, sampleStockVolume } from './volumeSampler'
+import { readVolumeStore, writeVolumeStore } from './volumeStore'
 
 // fetchPoolSwaps is mocked so the page token behaviour can be asserted without a network call;
 // seekPageToken is left real, both to build the expected token and because it is a pure function.
@@ -9,6 +11,8 @@ vi.mock('../clients/uniswap', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../clients/uniswap')>()
   return { ...actual, fetchPoolSwaps: vi.fn() }
 })
+
+vi.mock('./volumeStore', () => ({ readVolumeStore: vi.fn(), writeVolumeStore: vi.fn() }))
 
 describe('aggregateSeries', () => {
   it('sums each hour across pools', () => {
@@ -75,5 +79,95 @@ describe('backfillPool sampling the current hour', () => {
     expect(pastHourCall[1]).toMatchObject({
       pageToken: seekPageToken(now - HOUR_MS, target.chainId),
     })
+  })
+})
+
+describe('sampleStockVolume pacing a failed backfill', () => {
+  const now = Date.UTC(2026, 0, 1, 12, 0, 0)
+  const row = {
+    poolId: '0xABC',
+    chainId: 8453,
+    protocol: 'uniswapv4',
+    isStock: true,
+    volume24hUsd: 500_000,
+  }
+
+  /** The backfill log the sampler persisted on its one write. */
+  const writtenBackfill = () => vi.mocked(writeVolumeStore).mock.calls[0][0].backfill
+
+  beforeEach(() => {
+    vi.mocked(fetchPoolSwaps).mockResolvedValue({ swaps: [], nextPageToken: null })
+    vi.mocked(readVolumeStore).mockReturnValue({ history: {}, backfill: {} })
+  })
+
+  afterEach(() => vi.clearAllMocks())
+
+  it('records the attempt when the backfill yields nothing', async () => {
+    // Without this the key is never written, so the whole 48 request backfill repeats on the
+    // next poll and every poll after it, for as long as the gateway keeps failing.
+    await sampleStockVolume([row], now)
+
+    expect(writtenBackfill()).toEqual({ '0xabc': { attempts: 1, lastAttemptMs: now } })
+  })
+
+  it('leaves the pool alone until its backoff has passed', async () => {
+    vi.mocked(readVolumeStore).mockReturnValue({
+      history: {},
+      backfill: { '0xabc': { attempts: 1, lastAttemptMs: now - VOLUME_BACKFILL_RETRY_MS + 1 } },
+    })
+
+    await sampleStockVolume([row], now)
+
+    expect(fetchPoolSwaps).not.toHaveBeenCalled()
+  })
+
+  it('tries again once the gap has passed, and counts the attempt', async () => {
+    vi.mocked(readVolumeStore).mockReturnValue({
+      history: {},
+      backfill: { '0xabc': { attempts: 1, lastAttemptMs: now - VOLUME_BACKFILL_RETRY_MS } },
+    })
+
+    await sampleStockVolume([row], now)
+
+    expect(fetchPoolSwaps).toHaveBeenCalled()
+    expect(writtenBackfill()).toEqual({ '0xabc': { attempts: 2, lastAttemptMs: now } })
+  })
+
+  it('stretches the gap to its cap rather than growing without limit', async () => {
+    const capped = VOLUME_BACKFILL_MAX_ATTEMPTS * VOLUME_BACKFILL_RETRY_MS
+    vi.mocked(readVolumeStore).mockReturnValue({
+      history: {},
+      backfill: { '0xabc': { attempts: 20, lastAttemptMs: now - capped + 1 } },
+    })
+
+    await sampleStockVolume([row], now)
+    expect(fetchPoolSwaps).not.toHaveBeenCalled()
+
+    vi.mocked(readVolumeStore).mockReturnValue({
+      history: {},
+      backfill: { '0xabc': { attempts: 20, lastAttemptMs: now - capped } },
+    })
+
+    await sampleStockVolume([row], now)
+    expect(fetchPoolSwaps).toHaveBeenCalled()
+  })
+
+  it('clears the marker once a backfill returns buckets', async () => {
+    vi.mocked(readVolumeStore).mockReturnValue({
+      history: {},
+      backfill: { '0xabc': { attempts: 2, lastAttemptMs: now - 10 * VOLUME_BACKFILL_RETRY_MS } },
+    })
+    vi.mocked(fetchPoolSwaps).mockResolvedValue({
+      swaps: [
+        { timestampMs: now - 600_000, amountUsd: 100, walletAddress: '0x1' },
+        { timestampMs: now - 300_000, amountUsd: 250, walletAddress: '0x2' },
+      ],
+      nextPageToken: null,
+    })
+
+    const history = await sampleStockVolume([row], now)
+
+    expect(writtenBackfill()).toEqual({})
+    expect(history['0xabc'].length).toBeGreaterThan(0)
   })
 })

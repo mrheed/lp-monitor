@@ -1,5 +1,8 @@
 import {
+  VOLUME_BACKFILL_CONCURRENCY,
   VOLUME_BACKFILL_HOURS,
+  VOLUME_BACKFILL_MAX_ATTEMPTS,
+  VOLUME_BACKFILL_RETRY_MS,
   VOLUME_SAMPLE_CONCURRENCY,
   VOLUME_SAMPLE_PAGE_SIZE,
   VOLUME_SAMPLE_POOL_LIMIT,
@@ -15,7 +18,18 @@ import {
   rateUsdPerHour,
   type VolumeBucket,
 } from './volumeHistory'
-import { readVolumeHistory, writeVolumeHistory, type VolumeHistory } from './volumeStore'
+import {
+  readVolumeStore,
+  writeVolumeStore,
+  type BackfillAttempt,
+  type VolumeHistory,
+} from './volumeStore'
+
+/** The pool fields the sampler needs: which pools to sample, in what order, and how to fetch. */
+export type VolumeSampleTarget = Pick<
+  PoolRow,
+  'poolId' | 'chainId' | 'protocol' | 'isStock' | 'volume24hUsd'
+>
 
 /**
  * Total hourly volume across every pool in the history.
@@ -82,13 +96,29 @@ export const backfillPool = async (
   const hourEnds = Array.from({ length: hours }, (_, i) => latest - i * HOUR_MS)
   const buckets: VolumeBucket[] = []
 
-  for (let index = 0; index < hourEnds.length; index += VOLUME_SAMPLE_CONCURRENCY) {
-    const slice = hourEnds.slice(index, index + VOLUME_SAMPLE_CONCURRENCY)
+  for (let index = 0; index < hourEnds.length; index += VOLUME_BACKFILL_CONCURRENCY) {
+    const slice = hourEnds.slice(index, index + VOLUME_BACKFILL_CONCURRENCY)
     const sampled = await Promise.all(slice.map((hourEnd) => sampleHour(target, hourEnd)))
     for (const bucket of sampled) if (bucket !== null) buckets.push(bucket)
   }
 
   return buckets.sort((a, b) => a.hourEndMs - b.hourEndMs)
+}
+
+/**
+ * Whether a pool with no history has waited long enough for another backfill.
+ *
+ * A backfill costs 48 requests and can return nothing twice over: the gateway may be failing, or
+ * the pool may simply be too quiet to yield two swaps in any hour. Neither case writes buckets,
+ * so without a recorded attempt the pool looks untried and the full 48 requests repeat on every
+ * poll for as long as the condition lasts. Each failure widens the gap by another retry interval,
+ * to a ceiling of `VOLUME_BACKFILL_MAX_ATTEMPTS` of them.
+ */
+const backfillDue = (attempt: BackfillAttempt | undefined, now: number): boolean => {
+  if (attempt === undefined) return true
+
+  const gaps = Math.min(attempt.attempts, VOLUME_BACKFILL_MAX_ATTEMPTS)
+  return now - attempt.lastAttemptMs >= gaps * VOLUME_BACKFILL_RETRY_MS
 }
 
 /**
@@ -100,10 +130,10 @@ export const backfillPool = async (
  * whatever multiple it hits.
  */
 export const sampleStockVolume = async (
-  rows: PoolRow[],
+  rows: VolumeSampleTarget[],
   now: number = Date.now(),
 ): Promise<VolumeHistory> => {
-  const history = readVolumeHistory()
+  const { history, backfill } = readVolumeStore()
 
   const targets = rows
     .filter((row) => row.isStock && hasTransactionFeed(row.protocol))
@@ -122,8 +152,19 @@ export const sampleStockVolume = async (
         const existing = history[key]
 
         if (existing === undefined || existing.length === 0) {
+          if (!backfillDue(backfill[key], now)) return
+
           const backfilled = await backfillPool(target, VOLUME_BACKFILL_HOURS, now)
-          if (backfilled.length > 0) history[key] = backfilled
+
+          if (backfilled.length > 0) {
+            history[key] = backfilled
+            delete backfill[key]
+            return
+          }
+
+          // Recorded even though it produced nothing, which is the whole point: an unrecorded
+          // failure is indistinguishable from a pool never tried.
+          backfill[key] = { attempts: (backfill[key]?.attempts ?? 0) + 1, lastAttemptMs: now }
           return
         }
 
@@ -133,6 +174,6 @@ export const sampleStockVolume = async (
     )
   }
 
-  writeVolumeHistory(history)
+  writeVolumeStore({ history, backfill })
   return history
 }

@@ -15,3 +15,4 @@ next-env.d.ts
 .alerts.json
 .pool-sightings.json
 .volume-history.json
+.volume-history.json.tmp
