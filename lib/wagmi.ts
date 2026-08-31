@@ -11,6 +11,7 @@ import {
 import { createConfig, http, type Transport } from 'wagmi'
 import { arbitrum, base, bsc, mainnet, optimism, polygon } from 'wagmi/chains'
 import { defineChain, type Chain } from 'viem'
+import { robinhoodRpcUrls } from './rpc'
 
 /**
  * Robinhood Chain is not in wagmi's registry, so it is defined from the public chain list.
@@ -24,7 +25,7 @@ export const robinhoodChain = defineChain({
   nativeCurrency: { name: 'Ethereum', symbol: 'ETH', decimals: 18 },
   rpcUrls: {
     default: {
-      http: ['https://rpc.arrowrpc.com', 'https://rpc.mainnet.chain.robinhood.com'],
+      http: robinhoodRpcUrls(),
     },
   },
   blockExplorers: {
