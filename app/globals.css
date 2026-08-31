@@ -40,6 +40,16 @@
   --accent-ink: oklch(0.17 0.02 200);
 
   /* Status. Green earns, amber warns, red is where capital gets hurt. */
+  /*
+   * Chart series. Darker steps of the accent (200) and caution (80) hues than the UI tokens,
+   * because a mark sitting on the plot surface needs OKLCH L inside 0.48 to 0.67 to stay legible;
+   * the interface steps at 0.78 and 0.82 wash out against it. Validated as a categorical pair:
+   * normal-vision separation 21.5, worst colour-vision-deficient separation 18.0, both above the
+   * 15 and 8 floors, and each above 3:1 against the surface.
+   */
+  --chart-total: oklch(0.66 0.13 200);
+  --chart-pool: oklch(0.63 0.13 80);
+
   --gain: oklch(0.79 0.15 155);
   --caution: oklch(0.82 0.14 80);
   --risk: oklch(0.7 0.18 25);

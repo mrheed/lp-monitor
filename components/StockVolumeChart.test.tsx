@@ -1,65 +1,92 @@
 import { describe, expect, it } from 'vitest'
-import { chartGeometry } from './StockVolumeChart'
+import { chartBars, valueTicks } from './StockVolumeChart'
 
 const HOUR = 3_600_000
-const bucket = (hourEndMs: number, volumeUsd: number) => ({
+const bucket = (hourEndMs: number, volumeUsd: number, spanMs = HOUR) => ({
   hourEndMs,
   volumeUsd,
   swaps: 10,
-  spanMs: HOUR,
+  spanMs,
 })
 
-describe('chartGeometry', () => {
-  it('scales the tallest bucket to the full height', () => {
-    const { points, max } = chartGeometry([bucket(HOUR, 0), bucket(2 * HOUR, 100)], 100, 50)
+describe('chartBars', () => {
+  it('scales the tallest bar to the full plot height and anchors every bar to the baseline', () => {
+    const { bars, max } = chartBars([bucket(HOUR, 50), bucket(2 * HOUR, 100)], 100, 50)
 
     expect(max).toBe(100)
-    // Highest volume sits at y=0, lowest at the baseline.
-    expect(points).toBe('0,50 100,0')
+    expect(bars).toHaveLength(2)
+    expect(bars[1].height).toBe(50)
+    expect(bars[1].y).toBe(0)
+    // Half the value is half the height, and its foot still sits on the baseline.
+    expect(bars[0].height).toBe(25)
+    expect(bars[0].y + bars[0].height).toBe(50)
   })
 
-  it('draws a flat line rather than dividing by zero when nothing traded', () => {
-    const { points } = chartGeometry([bucket(HOUR, 0), bucket(2 * HOUR, 0)], 100, 50)
+  it('positions bars by time, so a missing hour leaves a gap rather than closing up', () => {
+    const { bars } = chartBars([bucket(HOUR, 10), bucket(4 * HOUR, 10)], 300, 50)
 
-    expect(points).toBe('0,50 100,50')
+    // Three hours apart across a three hour span: first at the left edge, second at the right.
+    expect(bars[0].x).toBeLessThan(bars[1].x)
+    expect(bars[1].x + bars[1].width).toBeLessThanOrEqual(300)
   })
 
-  it('yields no points for an empty series', () => {
-    expect(chartGeometry([], 100, 50)).toEqual({ points: '', max: 0, xs: [], hourWidth: 0 })
+  it('gives a single bucket a real width instead of the whole plot', () => {
+    const { bars } = chartBars([bucket(HOUR, 42)], 300, 50)
+
+    expect(bars).toHaveLength(1)
+    expect(bars[0].width).toBeGreaterThan(0)
+    expect(bars[0].width).toBeLessThan(300 / 2)
   })
 
-  it('places a single bucket at the left edge', () => {
-    const { points } = chartGeometry([bucket(HOUR, 42)], 100, 50)
+  it('leaves a gap between neighbouring bars so they read as separate marks', () => {
+    const { bars } = chartBars([bucket(HOUR, 10), bucket(2 * HOUR, 10), bucket(3 * HOUR, 10)], 300, 50)
 
-    expect(points).toBe('0,0')
+    expect(bars[1].x).toBeGreaterThan(bars[0].x + bars[0].width)
   })
 
-  it('spaces buckets by their hour, so an unsampled hour reads as a gap', () => {
-    // Three buckets covering four hours. Plotted by index the missing hour would be closed up
-    // and the chart would claim the pool traded continuously.
-    const { xs } = chartGeometry(
-      [bucket(HOUR, 10), bucket(2 * HOUR, 20), bucket(4 * HOUR, 30)],
-      120,
-      50,
-    )
+  it('draws a zero-volume hour as a visible baseline tick, not as nothing', () => {
+    const { bars } = chartBars([bucket(HOUR, 0), bucket(2 * HOUR, 100)], 100, 50)
 
-    expect(xs).toEqual([0, 40, 120])
+    expect(bars[0].height).toBeGreaterThan(0)
+    expect(bars[0].y + bars[0].height).toBe(50)
   })
 
-  it('draws on the span it is given, so an overlay shares the aggregate axis', () => {
-    // A pool with one hour of history belongs at its own hour on the total's axis, not stretched
-    // across the whole chart.
-    const { xs } = chartGeometry([bucket(3 * HOUR, 10)], 100, 50, {
-      fromMs: HOUR,
-      toMs: 5 * HOUR,
-    })
+  it('keeps every bar on the baseline when nothing traded at all', () => {
+    const { bars, max } = chartBars([bucket(HOUR, 0), bucket(2 * HOUR, 0)], 100, 50)
 
-    expect(xs).toEqual([50])
+    expect(max).toBe(0)
+    for (const bar of bars) expect(bar.y + bar.height).toBe(50)
   })
 
-  it('reports how wide one hour is, so the session shading lines up with the plot', () => {
-    const { hourWidth } = chartGeometry([bucket(HOUR, 10), bucket(5 * HOUR, 20)], 100, 50)
+  it('yields nothing for an empty series', () => {
+    expect(chartBars([], 100, 50)).toEqual({ bars: [], max: 0 })
+  })
 
-    expect(hourWidth).toBe(25)
+  it('scales against a supplied max, so an overlay shares the aggregate axis', () => {
+    const { bars } = chartBars([bucket(HOUR, 25)], 100, 50, 100)
+
+    // A quarter of the shared maximum, not the full height it would take on its own.
+    expect(bars[0].height).toBe(12.5)
+  })
+})
+
+describe('valueTicks', () => {
+  it('returns rounded values covering the range', () => {
+    const ticks = valueTicks(1000)
+
+    expect(ticks.length).toBeGreaterThanOrEqual(2)
+    expect(Math.max(...ticks)).toBeGreaterThanOrEqual(1000)
+    expect(ticks[0]).toBe(0)
+  })
+
+  it('never divides by zero on an empty chart', () => {
+    expect(valueTicks(0)).toEqual([0])
+  })
+
+  it('steps on a human interval rather than an arbitrary fraction', () => {
+    const ticks = valueTicks(430_000)
+    const step = ticks[1] - ticks[0]
+
+    expect([1, 2, 2.5, 5].some((m) => Math.abs(step / 10 ** Math.floor(Math.log10(step)) - m) < 1e-9)).toBe(true)
   })
 })

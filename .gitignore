@@ -16,3 +16,4 @@ next-env.d.ts
 .pool-sightings.json
 .volume-history.json
 .volume-history.json.tmp
+.playwright-mcp/
