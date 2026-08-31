@@ -17,9 +17,14 @@ const GATEWAY_HEADERS = {
   'x-request-source': 'uniswap-web',
 }
 
+/** The signed token amount on one side of a swap. Its sign is the trade's direction. */
+const sideSchema = z.object({ amount: z.string().default('0') }).optional()
+
 const transactionSchema = z.object({
   poolId: z.string().default(''),
   timestampMs: z.string(),
+  token0: sideSchema,
+  token1: sideSchema,
   // Distinguishes a swap from a liquidity add or remove; the feed mixes all three.
   eventType: z.string().optional(),
   walletAddress: z.string().optional(),
@@ -58,6 +63,12 @@ export type PoolSwap = {
   timestampMs: number
   amountUsd: number
   walletAddress: string
+  /**
+   * Signed token amounts, kept because their sign is the only record of direction. The feed
+   * reports `amountUsd` as a magnitude, so without these a buy and a sell look identical.
+   */
+  amount0: number
+  amount1: number
 }
 
 /**
@@ -122,6 +133,8 @@ export const fetchPoolSwaps = async (
       timestampMs: Number(entry.timestampMs),
       amountUsd: Math.abs(entry.amountUsd ?? 0),
       walletAddress: entry.walletAddress ?? '',
+      amount0: Number(entry.token0?.amount ?? 0),
+      amount1: Number(entry.token1?.amount ?? 0),
     }))
     .filter((swap) => Number.isFinite(swap.timestampMs))
 

@@ -172,8 +172,8 @@ describe('sampleStockVolume pacing a failed backfill', () => {
     })
     vi.mocked(fetchPoolSwaps).mockResolvedValue({
       swaps: [
-        { timestampMs: now - 600_000, amountUsd: 100, walletAddress: '0x1' },
-        { timestampMs: now - 300_000, amountUsd: 250, walletAddress: '0x2' },
+        { timestampMs: now - 600_000, amountUsd: 100, walletAddress: '0x1', amount0: 0, amount1: 0 },
+        { timestampMs: now - 300_000, amountUsd: 250, walletAddress: '0x2', amount0: 0, amount1: 0 },
       ],
       nextPageToken: null,
     })

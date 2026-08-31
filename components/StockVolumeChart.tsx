@@ -119,6 +119,8 @@ type Props = {
   aggregate: VolumeBucket[]
   selected: VolumeBucket[] | null
   selectedLabel: string | null
+  /** What the total series is. Defaults to every stock pool; a detail view names its ticker. */
+  aggregateLabel?: string
 }
 
 /**
@@ -128,7 +130,12 @@ type Props = {
  * pools put 41% of weekday volume inside the session against 52% for a memecoin control, so the
  * session does not account for when they trade.
  */
-export const StockVolumeChart = ({ aggregate, selected, selectedLabel }: Props) => {
+export const StockVolumeChart = ({
+  aggregate,
+  selected,
+  selectedLabel,
+  aggregateLabel = 'All stock pools',
+}: Props) => {
   const [hovered, setHovered] = useState<number | null>(null)
 
   // Bars scale to the top gridline rather than to the tallest bar, so the axis ends on a labelled
@@ -193,7 +200,7 @@ export const StockVolumeChart = ({ aggregate, selected, selectedLabel }: Props) 
         </span>
         <span className="flex items-center gap-1.5 text-[11px] text-ink-muted">
           <span aria-hidden className="h-2 w-2 rounded-[1px] bg-[var(--chart-total)]" />
-          All stock pools
+          {aggregateLabel}
         </span>
         {selectedLabel ? (
           <span className="flex items-center gap-1.5 text-[11px] text-ink-muted">
@@ -329,7 +336,7 @@ export const StockVolumeChart = ({ aggregate, selected, selectedLabel }: Props) 
             <p className="mt-1 flex items-center gap-1.5 whitespace-nowrap text-[11px] text-ink">
               <span aria-hidden className="h-2 w-2 rounded-[1px] bg-[var(--chart-total)]" />
               <span className="font-mono tabular-nums">{money(active.bucket.volumeUsd)}</span>
-              <span className="text-ink-ghost">all pools</span>
+              <span className="text-ink-ghost">{aggregateLabel}</span>
             </p>
             {activeOverlay ? (
               <p className="mt-0.5 flex items-center gap-1.5 whitespace-nowrap text-[11px] text-ink">

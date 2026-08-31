@@ -9,6 +9,11 @@ import {
 } from '../config'
 import { fetchPoolSwaps, seekPageToken, type ActivityTarget } from '../clients/uniswap'
 import { hasTransactionFeed } from '../chains'
+
+// Re-exported so server callers keep importing it beside the sampler. It is declared in
+// volumeHistory because client components need it, and this module reaches volumeStore, which
+// opens with a filesystem import that must never resolve into a browser bundle.
+export { aggregateSeries } from './volumeHistory'
 import type { PoolRow } from '../types'
 import {
   HOUR_MS,
@@ -32,36 +37,6 @@ export type VolumeSampleTarget = Pick<
   'poolId' | 'chainId' | 'protocol' | 'isStock' | 'volume24hUsd'
 >
 
-/**
- * Total hourly volume across every pool in the history.
- *
- * Each pool's bucket is scaled to a full hour before being added. A pool sampled over three
- * minutes and one sampled over forty describe the same hour at different resolutions, and adding
- * their raw observations would weight the slow sampler higher for no reason.
- *
- * Filtered through the same `hourlyReadings` the spike detector uses, so the chart and the alert
- * agree on which buckets are real. A page spanning more than an hour cannot say which hour its
- * volume belonged to, and on a quiet pool consecutive backfill pages overlap, so counting them
- * scaled the same swaps into several hours and the chart double counted them.
- */
-export const aggregateSeries = (history: VolumeHistory): VolumeBucket[] => {
-  const byHour = new Map<number, VolumeBucket>()
-
-  for (const buckets of Object.values(history))
-    for (const bucket of hourlyReadings(buckets)) {
-      const existing = byHour.get(bucket.hourEndMs)
-      const scaled = rateUsdPerHour(bucket)
-
-      byHour.set(bucket.hourEndMs, {
-        hourEndMs: bucket.hourEndMs,
-        volumeUsd: (existing?.volumeUsd ?? 0) + scaled,
-        swaps: (existing?.swaps ?? 0) + bucket.swaps,
-        spanMs: HOUR_MS,
-      })
-    }
-
-  return [...byHour.values()].sort((a, b) => a.hourEndMs - b.hourEndMs)
-}
 
 /**
  * Reads one hour's worth of swaps ending at `hourEndMs`, as a bucket.

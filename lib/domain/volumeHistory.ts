@@ -113,3 +113,31 @@ export const medianRate = (buckets: VolumeBucket[]): number => {
   const rates = buckets.map(rateUsdPerHour).sort((a, b) => a - b)
   return rates[Math.floor(rates.length / 2)]
 }
+
+/**
+ * Total hourly volume across every pool in a history.
+ *
+ * Each pool's bucket is scaled to a full hour before being added, because a pool sampled over
+ * three minutes and one sampled over forty describe the same hour at different resolutions, and
+ * adding their raw observations would weight the slow sampler higher for no reason.
+ *
+ * Buckets whose sample spanned more than an hour are dropped, matching what the spike detector
+ * counts, so the chart and the alerts cannot disagree about which readings are real.
+ */
+export const aggregateSeries = (history: VolumeHistory): VolumeBucket[] => {
+  const byHour = new Map<number, VolumeBucket>()
+
+  for (const buckets of Object.values(history))
+    for (const bucket of hourlyReadings(buckets)) {
+      const existing = byHour.get(bucket.hourEndMs)
+
+      byHour.set(bucket.hourEndMs, {
+        hourEndMs: bucket.hourEndMs,
+        volumeUsd: (existing?.volumeUsd ?? 0) + rateUsdPerHour(bucket),
+        swaps: (existing?.swaps ?? 0) + bucket.swaps,
+        spanMs: HOUR_MS,
+      })
+    }
+
+  return [...byHour.values()].sort((a, b) => a.hourEndMs - b.hourEndMs)
+}

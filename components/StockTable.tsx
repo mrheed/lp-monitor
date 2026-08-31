@@ -1,31 +1,29 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
+import { StockDetail } from './StockDetail'
 import { StockSparkline } from './StockSparkline'
-import {
-  TIMEFRAMES,
-  describeSample,
-  timeframeVolume,
-  txPerHour,
-  type Timeframe,
-} from '@/lib/domain/volumeTimeframes'
-import type { VolumeHistory } from '@/lib/domain/volumeHistory'
+import { TIMEFRAMES, type Timeframe } from '@/lib/domain/volumeTimeframes'
+import { aggregateSeries, type VolumeBucket, type VolumeHistory } from '@/lib/domain/volumeHistory'
+import type { StockGroup } from '@/lib/domain/stockGroups'
 import type { PoolRow } from '@/lib/types'
 
-/** A drawn caret, so the sort direction is not a text glyph pretending to be an icon. */
-const SortCaret = ({ descending }: { descending: boolean }) => (
+type Group = StockGroup<PoolRow>
+
+/** Sortable columns. Volume columns are keyed by the window they report. */
+type SortKey = Timeframe | 'tx' | 'ticker' | 'pools'
+
+/** A drawn caret, so sort direction and row state are not text glyphs standing in for icons. */
+const Caret = ({ open }: { open: boolean }) => (
   <svg
     aria-hidden
     viewBox="0 0 8 5"
-    className="ml-1 inline-block h-[5px] w-2 align-middle"
-    style={{ transform: descending ? undefined : 'rotate(180deg)' }}
+    className="inline-block h-[5px] w-2 align-middle"
+    style={{ transform: open ? undefined : 'rotate(-90deg)' }}
   >
     <path d="M0 0 L4 5 L8 0 Z" fill="currentColor" />
   </svg>
 )
-
-/** Sortable columns. Volume columns share one reader, so they are keyed by their timeframe. */
-type SortKey = Timeframe | 'tx' | 'pair'
 
 const money = (value: number): string => {
   if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`
@@ -34,51 +32,89 @@ const money = (value: number): string => {
   return value > 0 ? '<$1' : '$0'
 }
 
-/** Sorting value for a column, with unsampled rows pushed below every measured one. */
-const sortValue = (row: PoolRow, key: SortKey): number => {
-  if (key === 'pair') return 0
-  if (key === 'tx') return txPerHour(row)?.perHour ?? -1
-  return timeframeVolume(row, key).usd ?? -1
+/**
+ * The minute is not a window the feed reports.
+ *
+ * It sums the sampled hourly rate across the ticker's pools and scales it down, so it is drawn
+ * dotted wherever it appears: a sample of twenty five swaps spans seconds on a busy stock and
+ * hours on a quiet one.
+ */
+const perMinute = (group: Group): number | null => {
+  const sampled = group.pools.filter(
+    (pool) =>
+      pool.activity !== null && pool.activity.sampleSize > 0 && pool.activity.windowSeconds > 0,
+  )
+  if (sampled.length === 0) return null
+
+  return sampled.reduce((total, pool) => total + (pool.activity?.volumeUsdPerHour ?? 0), 0) / 60
+}
+
+const columnValue = (group: Group, key: SortKey): number => {
+  if (key === 'ticker') return 0
+  if (key === 'pools') return group.pools.length
+  if (key === 'tx') return group.txPerHour ?? -1
+  if (key === '1m') return perMinute(group) ?? -1
+  if (key === '1h') return group.volume1hUsd
+  if (key === '24h') return group.volume24hUsd
+  if (key === '7d') return group.volume7dUsd
+  return group.volume30dUsd
 }
 
 type Props = {
-  rows: PoolRow[]
+  groups: Group[]
   byPool: VolumeHistory
-  selected: string | null
-  onSelect: (poolId: string | null) => void
+  expanded: string | null
+  onExpand: (ticker: string | null) => void
 }
 
 /**
- * The stock pools, read as volume rather than as liquidity positions.
+ * The equities trading on this chain, one row each, expanding to the pools behind them.
  *
- * Separate from PoolTable rather than more columns on it: that table ranks pools to provide into,
- * so it leads with score, TVL and fee rate. This one answers what is trading and how often, which
- * wants a different set of columns and a chart per row.
+ * A ticker is spread across many pools, sixteen for NVDA, so a row per pool answers "which pool"
+ * when the question is "what is trading". The pools stay one click away.
  */
-export const StockTable = ({ rows, byPool, selected, onSelect }: Props) => {
+export const StockTable = ({ groups, byPool, expanded, onExpand }: Props) => {
   const [sort, setSort] = useState<{ key: SortKey; descending: boolean }>({
     key: '24h',
     descending: true,
   })
 
+  /** Each ticker's hourly series, summed over its pools, for the row sparkline. */
+  const series = useMemo(() => {
+    const out = new Map<string, VolumeBucket[]>()
+    for (const group of groups) {
+      const own: VolumeHistory = {}
+      for (const pool of group.pools) {
+        const buckets = byPool[pool.poolId.toLowerCase()]
+        if (buckets) own[pool.poolId.toLowerCase()] = buckets
+      }
+      out.set(group.ticker, aggregateSeries(own))
+    }
+    return out
+  }, [groups, byPool])
+
   const sorted = useMemo(() => {
     const direction = sort.descending ? -1 : 1
-    return [...rows].sort((a, b) => {
-      if (sort.key === 'pair') return a.pair.localeCompare(b.pair) * direction
-      return (sortValue(a, sort.key) - sortValue(b, sort.key)) * direction
-    })
-  }, [rows, sort])
+    return [...groups].sort((a, b) =>
+      sort.key === 'ticker'
+        ? a.ticker.localeCompare(b.ticker) * direction
+        : (columnValue(a, sort.key) - columnValue(b, sort.key)) * direction,
+    )
+  }, [groups, sort])
 
-  /** Clicking the active column flips direction; a new column starts on its largest values. */
   const toggle = (key: SortKey) =>
     setSort((current) =>
       current.key === key
         ? { key, descending: !current.descending }
-        : { key, descending: key !== 'pair' },
+        : { key, descending: key !== 'ticker' },
     )
 
   const heading = (key: SortKey, label: string, align: 'left' | 'right') => (
-    <th key={key} scope="col" className={`px-3 py-2 ${align === 'right' ? 'text-right' : 'text-left'}`}>
+    <th
+      key={key}
+      scope="col"
+      className={`px-3 py-2 ${align === 'right' ? 'text-right' : 'text-left'}`}
+    >
       <button
         type="button"
         onClick={() => toggle(key)}
@@ -88,95 +124,116 @@ export const StockTable = ({ rows, byPool, selected, onSelect }: Props) => {
         }`}
       >
         {label}
-        {sort.key === key ? <SortCaret descending={sort.descending} /> : null}
+        {sort.key === key ? (
+          <span className="ml-1">
+            <Caret open={sort.descending} />
+          </span>
+        ) : null}
       </button>
     </th>
   )
 
   return (
     <div className="overflow-x-auto rounded border border-line">
-      <table className="w-full min-w-[860px] border-collapse text-[12px]">
+      <table className="w-full min-w-[900px] border-collapse text-[12px]">
         <thead className="border-b border-line bg-surface">
           <tr>
-            {heading('pair', 'Pair', 'left')}
+            {heading('ticker', 'Stock', 'left')}
             {TIMEFRAMES.map((frame) => heading(frame.id, frame.label, 'right'))}
             {heading('tx', 'Trades/h', 'right')}
-            <th scope="col" className="px-3 py-2 text-right text-[10px] uppercase tracking-[0.12em] text-ink-ghost">
+            {heading('pools', 'Pools', 'right')}
+            <th
+              scope="col"
+              className="px-3 py-2 text-right text-[10px] uppercase tracking-[0.12em] text-ink-ghost"
+            >
               48h
             </th>
           </tr>
         </thead>
         <tbody>
-          {sorted.map((row) => {
-            const active = row.poolId === selected
-            const trades = txPerHour(row)
+          {sorted.map((group) => {
+            const open = group.ticker === expanded
+            const figures: [Timeframe, number | null][] = [
+              ['1m', perMinute(group)],
+              ['1h', group.volume1hUsd],
+              ['24h', group.volume24hUsd],
+              ['7d', group.volume7dUsd],
+              ['30d', group.volume30dUsd],
+            ]
 
             return (
-              <tr
-                key={row.poolId}
-                onClick={() => onSelect(active ? null : row.poolId)}
-                aria-selected={active}
-                className={`cursor-pointer border-b border-line/60 transition-colors last:border-b-0 ${
-                  active ? 'bg-surface-raised' : 'hover:bg-surface'
-                }`}
-              >
-                <th scope="row" className="px-3 py-2 text-left font-medium text-ink">
-                  <span className="flex items-baseline gap-2">
-                    {row.pair}
-                    <span className="font-mono text-[10px] tabular-nums text-ink-ghost">
-                      {row.feeTier}%
+              <Fragment key={group.ticker}>
+                <tr
+                  onClick={() => onExpand(open ? null : group.ticker)}
+                  aria-expanded={open}
+                  className={`cursor-pointer border-b border-line/60 transition-colors ${
+                    open ? 'bg-surface-raised' : 'hover:bg-surface'
+                  }`}
+                >
+                  <th scope="row" className="px-3 py-2 text-left font-medium text-ink">
+                    <span className="flex items-center gap-2">
+                      <span className="text-ink-ghost">
+                        <Caret open={open} />
+                      </span>
+                      {group.ticker}
                     </span>
-                  </span>
-                </th>
+                  </th>
 
-                {TIMEFRAMES.map((frame) => {
-                  const reading = timeframeVolume(row, frame.id)
-                  const caveat =
-                    reading.sampleSeconds !== null && reading.sampleSwaps !== null
-                      ? describeSample(reading.sampleSeconds, reading.sampleSwaps)
-                      : undefined
-
-                  return (
+                  {figures.map(([id, value]) => (
                     <td
-                      key={frame.id}
-                      title={caveat}
+                      key={id}
+                      title={id === '1m' ? 'Rate inferred from a sample of recent swaps' : undefined}
                       className={`px-3 py-2 text-right font-mono tabular-nums ${
-                        reading.usd === null
+                        value === null
                           ? 'text-ink-ghost'
-                          : reading.estimated
+                          : id === '1m'
                             ? 'text-ink-muted decoration-dotted underline-offset-4 [text-decoration-line:underline]'
                             : 'text-ink'
                       }`}
                     >
-                      {reading.usd === null ? '—' : money(reading.usd)}
+                      {value === null ? '—' : money(value)}
                     </td>
-                  )
-                })}
+                  ))}
 
-                <td
-                  title={trades ? describeSample(trades.sampleSeconds, trades.sampleSwaps) : undefined}
-                  className={`px-3 py-2 text-right font-mono tabular-nums ${
-                    trades ? 'text-ink-muted decoration-dotted underline-offset-4 [text-decoration-line:underline]' : 'text-ink-ghost'
-                  }`}
-                >
-                  {trades ? Math.round(trades.perHour).toLocaleString() : '—'}
-                </td>
+                  <td
+                    title="Rate inferred from a sample of recent swaps"
+                    className={`px-3 py-2 text-right font-mono tabular-nums ${
+                      group.txPerHour === null
+                        ? 'text-ink-ghost'
+                        : 'text-ink-muted decoration-dotted underline-offset-4 [text-decoration-line:underline]'
+                    }`}
+                  >
+                    {group.txPerHour === null ? '—' : Math.round(group.txPerHour).toLocaleString()}
+                  </td>
 
-                <td className="px-3 py-1.5">
-                  <span className="flex justify-end">
-                    <StockSparkline buckets={byPool[row.poolId.toLowerCase()]} active={active} />
-                  </span>
-                </td>
-              </tr>
+                  <td className="px-3 py-2 text-right font-mono tabular-nums text-ink-ghost">
+                    {group.pools.length}
+                  </td>
+
+                  <td className="px-3 py-1.5">
+                    <span className="flex justify-end">
+                      <StockSparkline buckets={series.get(group.ticker)} active={open} />
+                    </span>
+                  </td>
+                </tr>
+
+                {open ? (
+                  <tr>
+                    <td colSpan={TIMEFRAMES.length + 4} className="p-0">
+                      <StockDetail ticker={group.ticker} pools={group.pools} byPool={byPool} />
+                    </td>
+                  </tr>
+                ) : null}
+              </Fragment>
             )
           })}
         </tbody>
       </table>
 
       <p className="border-t border-line px-3 py-2 text-[11px] leading-relaxed text-ink-ghost">
-        Dotted figures are rates inferred from a sample of recent trades rather than windows the
-        feed reports; hover one for the swaps and span behind it. Select a row to lay its volume
-        over the chart above.
+        Volume is summed across every pool holding that equity. Dotted figures are rates inferred
+        from a sample of recent swaps rather than windows the feed reports. Open a row for its
+        pools, their links, and its latest trades.
       </p>
     </div>
   )

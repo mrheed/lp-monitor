@@ -1,10 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { StockVolumeChart } from './StockVolumeChart'
 import { StockTable } from './StockTable'
+import { groupByStock } from '@/lib/domain/stockGroups'
 import type { PoolRow } from '@/lib/types'
 import {
+  aggregateSeries,
   hourlyReadings,
   isVolumeBucket,
   type VolumeBucket,
@@ -102,21 +104,38 @@ export const StockVolumePanel = ({ aggregate, byPool, rows }: Props) => {
     return () => clearInterval(timer)
   }, [])
 
-  const active = rows.find((row) => row.poolId === selected) ?? null
+  const groups = useMemo(() => groupByStock(rows), [rows])
+
+  // The overlay is the selected ticker's own volume, summed over its pools, so the line on the
+  // chart and the row that produced it describe the same thing.
+  const overlay = useMemo(() => {
+    if (selected === null) return null
+    const group = groups.find((entry) => entry.ticker === selected)
+    if (group === undefined) return null
+
+    const own: VolumeHistory = {}
+    for (const pool of group.pools) {
+      const buckets = series.byPool[pool.poolId.toLowerCase()]
+      if (buckets) own[pool.poolId.toLowerCase()] = buckets
+    }
+
+    const summed = aggregateSeries(own)
+    return summed.length > 0 ? summed : null
+  }, [groups, selected, series.byPool])
 
   return (
     <div className="space-y-3">
       <StockVolumeChart
         aggregate={series.aggregate}
-        selected={overlayFor(series.byPool, selected)}
-        selectedLabel={active?.pair ?? null}
+        selected={overlay}
+        selectedLabel={selected}
       />
 
       <StockTable
-        rows={rows}
+        groups={groups}
         byPool={series.byPool}
-        selected={selected}
-        onSelect={setSelected}
+        expanded={selected}
+        onExpand={setSelected}
       />
     </div>
   )

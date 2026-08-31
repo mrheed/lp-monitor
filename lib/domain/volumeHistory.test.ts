@@ -32,8 +32,8 @@ describe('bucketFromSwaps', () => {
   it('sums the swaps and records the span they covered', () => {
     const result = bucketFromSwaps(
       [
-        { timestampMs: 1_000_000, amountUsd: 100, walletAddress: '0x1' },
-        { timestampMs: 1_600_000, amountUsd: 50, walletAddress: '0x2' },
+        { timestampMs: 1_000_000, amountUsd: 100, walletAddress: '0x1', amount0: 0, amount1: 0 },
+        { timestampMs: 1_600_000, amountUsd: 50, walletAddress: '0x2', amount0: 0, amount1: 0 },
       ],
       HOUR_MS,
     )
@@ -47,7 +47,7 @@ describe('bucketFromSwaps', () => {
 
   it('yields null for a single swap, which spans no time and implies no rate', () => {
     expect(
-      bucketFromSwaps([{ timestampMs: 1_000_000, amountUsd: 100, walletAddress: '0x1' }], HOUR_MS),
+      bucketFromSwaps([{ timestampMs: 1_000_000, amountUsd: 100, walletAddress: '0x1', amount0: 0, amount1: 0 }], HOUR_MS),
     ).toBeNull()
   })
 })

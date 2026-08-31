@@ -32,7 +32,9 @@ describe('fetchPoolSwaps', () => {
 
     const { swaps } = await fetchPoolSwaps(target)
 
-    expect(swaps).toEqual([{ timestampMs: 1000, amountUsd: 10, walletAddress: '0x1' }])
+    expect(swaps).toEqual([
+      { timestampMs: 1000, amountUsd: 10, walletAddress: '0x1', amount0: 0, amount1: 0 },
+    ])
   })
 
   it('drops liquidity events, which are not volume', async () => {
