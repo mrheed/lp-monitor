@@ -33,6 +33,19 @@ describe('aggregateSeries', () => {
     expect(series[0].volumeUsd).toBe(200)
   })
 
+  it('leaves out samples spanning more than an hour, as the spike detector does', () => {
+    // A page covering six hours cannot say which hour its volume belonged to. Counting it would
+    // scale the same swaps into several buckets and show the chart a spike the detector denies.
+    const series = aggregateSeries({
+      '0xa': [
+        { hourEndMs: HOUR_MS, volumeUsd: 100, swaps: 5, spanMs: 6 * HOUR_MS },
+        { hourEndMs: 2 * HOUR_MS, volumeUsd: 40, swaps: 5, spanMs: HOUR_MS },
+      ],
+    })
+
+    expect(series).toEqual([{ hourEndMs: 2 * HOUR_MS, volumeUsd: 40, swaps: 5, spanMs: HOUR_MS }])
+  })
+
   it('orders hours oldest first', () => {
     const series = aggregateSeries({
       '0xa': [

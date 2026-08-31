@@ -14,6 +14,7 @@ import {
   HOUR_MS,
   alignHourEnd,
   bucketFromSwaps,
+  hourlyReadings,
   mergeBucket,
   rateUsdPerHour,
   type VolumeBucket,
@@ -37,12 +38,17 @@ export type VolumeSampleTarget = Pick<
  * Each pool's bucket is scaled to a full hour before being added. A pool sampled over three
  * minutes and one sampled over forty describe the same hour at different resolutions, and adding
  * their raw observations would weight the slow sampler higher for no reason.
+ *
+ * Filtered through the same `hourlyReadings` the spike detector uses, so the chart and the alert
+ * agree on which buckets are real. A page spanning more than an hour cannot say which hour its
+ * volume belonged to, and on a quiet pool consecutive backfill pages overlap, so counting them
+ * scaled the same swaps into several hours and the chart double counted them.
  */
 export const aggregateSeries = (history: VolumeHistory): VolumeBucket[] => {
   const byHour = new Map<number, VolumeBucket>()
 
   for (const buckets of Object.values(history))
-    for (const bucket of buckets) {
+    for (const bucket of hourlyReadings(buckets)) {
       const existing = byHour.get(bucket.hourEndMs)
       const scaled = rateUsdPerHour(bucket)
 

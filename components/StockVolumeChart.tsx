@@ -1,35 +1,52 @@
 'use client'
 
 import { useMemo } from 'react'
-import type { VolumeBucket } from '@/lib/domain/volumeHistory'
+import { HOUR_MS, type VolumeBucket } from '@/lib/domain/volumeHistory'
 
 const WIDTH = 960
 const HEIGHT = 200
 
+/** The stretch of time an x axis covers, so two series can be drawn on the same one. */
+export type TimeSpan = { fromMs: number; toMs: number }
+
 /**
- * Turns buckets into SVG polyline points.
+ * Turns buckets into SVG polyline points, plus the x positions they were drawn at.
  *
  * Exported so the scaling can be tested without rendering. The y axis is inverted because SVG
  * measures downward, so the busiest hour lands at zero.
+ *
+ * X is the bucket's hour against the span, not its position in the array. Plotted by index, an
+ * hour nobody sampled was closed up and the chart claimed continuous trading across a gap.
+ *
+ * `span` is what lets an overlay share the aggregate's axis; drawn on its own range instead, a
+ * pool holding three hours of history would stretch across two days of chart.
  */
 export const chartGeometry = (
   buckets: VolumeBucket[],
   width: number,
   height: number,
-): { points: string; max: number } => {
-  if (buckets.length === 0) return { points: '', max: 0 }
+  span?: TimeSpan,
+): { points: string; max: number; xs: number[]; hourWidth: number } => {
+  if (buckets.length === 0) return { points: '', max: 0, xs: [], hourWidth: 0 }
+
+  const hours = buckets.map((bucket) => bucket.hourEndMs)
+  const fromMs = span?.fromMs ?? Math.min(...hours)
+  const rangeMs = (span?.toMs ?? Math.max(...hours)) - fromMs
 
   const max = Math.max(...buckets.map((bucket) => bucket.volumeUsd))
-  const step = buckets.length > 1 ? width / (buckets.length - 1) : 0
+  const xs = buckets.map((bucket) =>
+    rangeMs > 0 ? ((bucket.hourEndMs - fromMs) / rangeMs) * width : 0,
+  )
 
   const points = buckets
     .map((bucket, index) => {
       const y = max > 0 ? height - (bucket.volumeUsd / max) * height : height
-      return `${Math.round(index * step)},${Math.round(y)}`
+      return `${Math.round(xs[index])},${Math.round(y)}`
     })
     .join(' ')
 
-  return { points, max }
+  // A single bucket spans no time, so its hour is the whole chart.
+  return { points, max, xs, hourWidth: rangeMs > 0 ? (HOUR_MS / rangeMs) * width : width }
 }
 
 /** Hour label in US Eastern, where the underlying equities trade. */
@@ -67,9 +84,20 @@ type Props = {
  */
 export const StockVolumeChart = ({ aggregate, selected, selectedLabel }: Props) => {
   const total = useMemo(() => chartGeometry(aggregate, WIDTH, HEIGHT), [aggregate])
+
+  // The aggregate owns the axis. An overlay drawn on its own hours would put the same clock time
+  // in a different place on each line, which is the one thing the overlay exists to compare.
+  const span = useMemo(
+    () =>
+      aggregate.length > 0
+        ? { fromMs: aggregate[0].hourEndMs, toMs: aggregate[aggregate.length - 1].hourEndMs }
+        : null,
+    [aggregate],
+  )
+
   const overlay = useMemo(
-    () => (selected ? chartGeometry(selected, WIDTH, HEIGHT) : null),
-    [selected],
+    () => (selected && span ? chartGeometry(selected, WIDTH, HEIGHT, span) : null),
+    [selected, span],
   )
 
   if (aggregate.length === 0) {
@@ -83,8 +111,6 @@ export const StockVolumeChart = ({ aggregate, selected, selectedLabel }: Props) 
   const sessions = aggregate
     .map((bucket, index) => ({ bucket, index }))
     .filter(({ bucket }) => inSession(bucket.hourEndMs))
-
-  const step = aggregate.length > 1 ? WIDTH / (aggregate.length - 1) : 0
 
   return (
     <figure className="rounded border border-line bg-surface px-4 py-3">
@@ -103,9 +129,9 @@ export const StockVolumeChart = ({ aggregate, selected, selectedLabel }: Props) 
         {sessions.map(({ index }) => (
           <rect
             key={index}
-            x={Math.round(index * step - step / 2)}
+            x={Math.round(total.xs[index] - total.hourWidth / 2)}
             y={0}
-            width={Math.max(Math.round(step), 1)}
+            width={Math.max(Math.round(total.hourWidth), 1)}
             height={HEIGHT}
             fill="var(--accent)"
             opacity={0.06}
