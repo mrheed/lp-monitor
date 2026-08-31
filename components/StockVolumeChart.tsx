@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { HOUR_MS, type VolumeBucket } from '@/lib/domain/volumeHistory'
 
 const PLOT_HEIGHT = 200
@@ -148,7 +148,8 @@ export const StockVolumeChart = ({
   compact = false,
 }: Props) => {
   const plotHeight = compact ? COMPACT_HEIGHT : PLOT_HEIGHT
-  const [hovered, setHovered] = useState<number | null>(null)
+  const [hovered, setHovered] = useState<{ index: number; leftPx: number } | null>(null)
+  const svgRef = useRef<SVGSVGElement | null>(null)
 
   // Bars scale to the top gridline rather than to the tallest bar, so the axis ends on a labelled
   // value and the peak sits under a line instead of against the top edge with nothing to read it
@@ -180,34 +181,44 @@ export const StockVolumeChart = ({
     )
   }
 
-  const active = hovered === null ? null : total.bars[hovered]
+  const active = hovered === null ? null : (total.bars[hovered.index] ?? null)
   const activeOverlay =
     active && overlay
       ? (overlay.bars.find((bar) => bar.bucket.hourEndMs === active.bucket.hourEndMs) ?? null)
       : null
 
   /**
-   * Nearest bar to the pointer, so the readout follows the cursor without needing a direct hit.
+   * Nearest bar to the pointer, plus where its centre sits in the element.
    *
-   * Both this and the tooltip below treat the element box as the viewBox. That holds only because
-   * the svg is sized by width alone: give it a fixed height and the default preserveAspectRatio
-   * centres a letterboxed drawing inside the box, and every reading drifts by the margin.
+   * Both come from the svg's own screen matrix rather than from its bounding box. A box gives the
+   * element's size, not where the viewBox landed inside it, and any difference between the two
+   * shows up as the readout drifting away from the cursor. The matrix is what the browser used to
+   * draw, so it cannot disagree with what is on screen.
    */
   const trackPointer = (event: React.PointerEvent<SVGSVGElement>) => {
-    const box = event.currentTarget.getBoundingClientRect()
-    const x = ((event.clientX - box.left) / box.width) * CHART_WIDTH
-    if (x > PLOT_WIDTH) return setHovered(null)
+    const svg = svgRef.current
+    const matrix = svg?.getScreenCTM()
+    if (!svg || !matrix) return
+
+    const local = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse())
+    if (local.x > PLOT_WIDTH) return setHovered(null)
 
     let nearest = 0
     let best = Infinity
     total.bars.forEach((bar, index) => {
-      const distance = Math.abs(bar.x + bar.width / 2 - x)
+      const distance = Math.abs(bar.x + bar.width / 2 - local.x)
       if (distance < best) {
         best = distance
         nearest = index
       }
     })
-    setHovered(nearest)
+
+    const bar = total.bars[nearest]
+    if (bar === undefined) return setHovered(null)
+
+    // Forward through the same matrix, then made relative to the element the readout is placed in.
+    const centre = new DOMPoint(bar.x + bar.width / 2, 0).matrixTransform(matrix)
+    setHovered({ index: nearest, leftPx: centre.x - svg.getBoundingClientRect().left })
   }
 
   return (
@@ -233,6 +244,7 @@ export const StockVolumeChart = ({
 
       <div className="relative">
         <svg
+          ref={svgRef}
           viewBox={`0 0 ${CHART_WIDTH} ${plotHeight + TOP_PAD + 22}`}
           className="block w-full touch-none"
           role="img"
@@ -289,7 +301,7 @@ export const StockVolumeChart = ({
               height={bar.height}
               rx={Math.min(2, bar.width / 2)}
               fill="var(--chart-total)"
-              opacity={hovered === null || hovered === index ? 1 : 0.55}
+              opacity={hovered === null || hovered.index === index ? 1 : 0.55}
             />
           ))}
 
@@ -338,7 +350,7 @@ export const StockVolumeChart = ({
           <div
             className="pointer-events-none absolute top-2 rounded border border-line-strong bg-surface-raised px-2.5 py-2 shadow-[var(--shadow-hover)]"
             style={{
-              left: `${((active.x + active.width / 2) / CHART_WIDTH) * 100}%`,
+              left: `${hovered?.leftPx ?? 0}px`,
               transform: 'translateX(-50%)',
             }}
           >
