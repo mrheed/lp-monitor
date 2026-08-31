@@ -1,37 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { overlayFor, readVolumePayload } from './StockVolumePanel'
+import { readVolumePayload } from './StockVolumePanel'
 
 const HOUR = 3_600_000
 const buckets = [{ hourEndMs: HOUR, volumeUsd: 100, swaps: 5, spanMs: HOUR }]
-
-describe('overlayFor', () => {
-  it('finds a pool by id regardless of casing', () => {
-    expect(overlayFor({ '0xabc': buckets }, '0xABC')).toEqual(buckets)
-  })
-
-  it('yields null when nothing is selected', () => {
-    expect(overlayFor({ '0xabc': buckets }, null)).toBeNull()
-  })
-
-  it('yields null for a pool with no history sampled yet', () => {
-    expect(overlayFor({ '0xabc': buckets }, '0xdef')).toBeNull()
-  })
-
-  it('filters out buckets that span more than an hour', () => {
-    const validBucket = { hourEndMs: HOUR, volumeUsd: 100, swaps: 5, spanMs: HOUR }
-    const tooLongBucket = { hourEndMs: 2 * HOUR, volumeUsd: 200, swaps: 10, spanMs: 2 * HOUR }
-    const history = { '0xabc': [validBucket, tooLongBucket] }
-
-    expect(overlayFor(history, '0xabc')).toEqual([validBucket])
-  })
-
-  it('yields null when all buckets are filtered out', () => {
-    const tooLongBucket = { hourEndMs: HOUR, volumeUsd: 100, swaps: 5, spanMs: 2 * HOUR }
-    const history = { '0xabc': [tooLongBucket] }
-
-    expect(overlayFor(history, '0xabc')).toBeNull()
-  })
-})
 
 describe('readVolumePayload', () => {
   it('reads what the volume route returns', () => {

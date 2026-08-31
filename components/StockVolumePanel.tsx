@@ -8,7 +8,6 @@ import type { PoolRow } from '@/lib/types'
 import {
   aggregateSeries,
   shareOfTotal,
-  hourlyReadings,
   isVolumeBucket,
   type VolumeBucket,
   type VolumeHistory,
@@ -19,18 +18,6 @@ const VOLUME_POLL_MS = 60_000
 
 /** What the chart draws: the total across pools, and each pool's own series. */
 type VolumeSeries = { aggregate: VolumeBucket[]; byPool: VolumeHistory }
-
-/** One pool's series filtered to hourly readings, or null when nothing is selected, the pool has not been sampled, or all buckets were filtered out. */
-export const overlayFor = (
-  byPool: VolumeHistory,
-  poolId: string | null,
-): VolumeBucket[] | null => {
-  if (poolId === null) return null
-  const buckets = byPool[poolId.toLowerCase()]
-  if (buckets === undefined) return null
-  const filtered = hourlyReadings(buckets)
-  return filtered.length > 0 ? filtered : null
-}
 
 /** Every bucket in a parsed array, or null if any of them is not a bucket. */
 const readSeries = (value: unknown): VolumeBucket[] | null => {

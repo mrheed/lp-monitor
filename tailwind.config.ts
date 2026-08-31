@@ -14,6 +14,7 @@ const config: Config = {
         canvas: 'var(--canvas)',
         surface: 'var(--surface)',
         'surface-raised': 'var(--surface-raised)',
+        'surface-hover': 'var(--surface-hover)',
         ink: {
           DEFAULT: 'var(--ink)',
           muted: 'var(--ink-muted)',

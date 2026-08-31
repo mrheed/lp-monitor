@@ -6,7 +6,7 @@ import { stockTicker } from '@/lib/domain/stockTokens'
 import {
   aggregateSeries,
   shareOfTotal,
-  hourlyReadings,
+  poolSeries,
   type VolumeBucket,
   type VolumeHistory,
 } from '@/lib/domain/volumeHistory'
@@ -122,12 +122,9 @@ export const StockDetail = ({ ticker, pools, byPool }: Props) => {
   )
   const tickerSeries = aggregateSeries(own)
 
-  const selectedSeries: VolumeBucket[] | null = (() => {
-    const buckets = byPool[pool.poolId.toLowerCase()]
-    if (buckets === undefined) return null
-    const readings = hourlyReadings(buckets)
-    return readings.length > 0 ? readings : null
-  })()
+  // Through poolSeries rather than the stored buckets, so the pool and the ticker total are in
+  // the same units. The stored buckets hold what a sample observed; the total holds hourly rates.
+  const selectedSeries: VolumeBucket[] | null = poolSeries(byPool, pool.poolId)
 
   const share = shareOfTotal(tickerSeries, selectedSeries)
   const poolShare = share === null ? null : share < 1 ? share.toFixed(2) : share.toFixed(1)
@@ -145,7 +142,10 @@ export const StockDetail = ({ ticker, pools, byPool }: Props) => {
               return (
                 <tr
                   key={entry.poolId}
-                  className={`border-b border-line/50 last:border-b-0 ${active ? 'text-ink' : 'text-ink-muted'}`}
+                  className={`cursor-pointer border-b border-line/50 transition-colors duration-150 last:border-b-0 ${
+                    active ? 'bg-surface-raised text-ink' : 'text-ink-muted hover:bg-surface-hover'
+                  }`}
+                  onClick={() => setPool(entry)}
                 >
                   <td className="py-1.5 pr-3">
                     <button

@@ -166,8 +166,8 @@ export const StockTable = ({ groups, byPool, expanded, onExpand }: Props) => {
                 <tr
                   onClick={() => onExpand(open ? null : group.ticker)}
                   aria-expanded={open}
-                  className={`cursor-pointer border-b border-line/60 transition-colors ${
-                    open ? 'bg-surface-raised' : 'hover:bg-surface'
+                  className={`cursor-pointer border-b border-line/60 transition-colors duration-150 ${
+                    open ? 'bg-surface-raised' : 'hover:bg-surface-hover'
                   }`}
                 >
                   <th scope="row" className="px-3 py-2 text-left font-medium text-ink">

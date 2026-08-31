@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   BUCKET_LIMIT,
+  aggregateSeries,
   HOUR_MS,
   alignHourEnd,
   bucketFromSwaps,
   hourlyReadings,
   medianRate,
   mergeBucket,
+  poolSeries,
   rateUsdPerHour,
   shareOfTotal,
 } from './volumeHistory'
@@ -142,5 +144,32 @@ describe('shareOfTotal', () => {
 
   it('handles a part covering hours the total does not', () => {
     expect(shareOfTotal([bucket(HOUR_MS, 100)], [bucket(9 * HOUR_MS, 5)])).toBeNull()
+  })
+})
+
+describe('poolSeries', () => {
+  it('scales a pool to hourly rates, matching the units an aggregate uses', () => {
+    // Three minutes of observation: $1,000 seen is $20,000 an hour, and the aggregate says so too.
+    const short = { hourEndMs: HOUR_MS, volumeUsd: 1_000, swaps: 100, spanMs: HOUR_MS / 20 }
+    const history = { '0xabc': [short] }
+
+    expect(poolSeries(history, '0xabc')?.[0].volumeUsd).toBe(20_000)
+    expect(poolSeries(history, '0xabc')?.[0].volumeUsd).toBe(aggregateSeries(history)[0].volumeUsd)
+  })
+
+  it('matches on pool id regardless of casing, since the store lowercases its keys', () => {
+    const history = { '0xabc': [bucket(HOUR_MS, 100)] }
+
+    expect(poolSeries(history, '0xABC')).not.toBeNull()
+  })
+
+  it('is null for a pool with no sampled history', () => {
+    expect(poolSeries({}, '0xabc')).toBeNull()
+  })
+
+  it('is null when every bucket is too smeared to place in an hour', () => {
+    const smeared = { hourEndMs: HOUR_MS, volumeUsd: 10, swaps: 5, spanMs: 6 * HOUR_MS }
+
+    expect(poolSeries({ '0xabc': [smeared] }, '0xabc')).toBeNull()
   })
 })

@@ -19,6 +19,8 @@
   --canvas: oklch(0.155 0.008 250);
   --surface: oklch(0.19 0.009 250);
   --surface-raised: oklch(0.225 0.01 250);
+  /* Row hover. Its own step, so hover and selected stay distinguishable from each other. */
+  --surface-hover: oklch(0.207 0.0095 250);
 
   /* Text, from primary down to the faintest legible label. */
   --ink: oklch(0.96 0.005 250);
@@ -281,6 +283,7 @@ body {
   --canvas: #f1eadf;
   --surface: #f1eadf;
   --surface-raised: #e8ddcc;
+  --surface-hover: #eae0d2;
 
   --ink: #151513;
   --ink-muted: #6f685f;
@@ -347,6 +350,7 @@ body:has(.editorial) header {
   --canvas: #f1eadf;
   --surface: #f1eadf;
   --surface-raised: #e8ddcc;
+  --surface-hover: #eae0d2;
 
   --ink: #151513;
   --ink-muted: #6f685f;

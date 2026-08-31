@@ -163,3 +163,19 @@ export const shareOfTotal = (
 
   return (part.reduce((sum, bucket) => sum + bucket.volumeUsd, 0) / totalUsd) * 100
 }
+
+/**
+ * One pool's series in the same units as an aggregate.
+ *
+ * Routed through {@link aggregateSeries} rather than returning the stored buckets, because those
+ * hold the volume a sample observed and the span it took, while an aggregate holds volume scaled
+ * to a full hour. Drawing a raw series against an aggregate understates it by however short the
+ * sample was, which on a busy pool is a factor of twenty.
+ */
+export const poolSeries = (history: VolumeHistory, poolId: string): VolumeBucket[] | null => {
+  const buckets = history[poolId.toLowerCase()]
+  if (buckets === undefined) return null
+
+  const scaled = aggregateSeries({ [poolId.toLowerCase()]: buckets })
+  return scaled.length > 0 ? scaled : null
+}
