@@ -90,6 +90,12 @@ export const hourlyReadings = (buckets: VolumeBucket[]): VolumeBucket[] =>
  *
  * A median rather than a mean because the baseline is compared against the very spike being
  * detected, and a mean would be dragged upward by it.
+ *
+ * An even number of buckets takes the upper of the two middle rates rather than averaging them,
+ * which is deliberate. The 5x default threshold was calibrated by replaying seven days of data
+ * through scripts using this same convention, so switching to an averaging median would move
+ * every baseline slightly down, lower the bar a spike has to clear, and detach the threshold
+ * from the evidence it was chosen on.
  */
 export const medianRate = (buckets: VolumeBucket[]): number => {
   if (buckets.length === 0) return 0

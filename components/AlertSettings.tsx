@@ -210,8 +210,9 @@ export const AlertSettings = ({
         disabled={unavailable}
         note={
           'Watches the stock pools only, comparing each hour against that pool’s own trailing ' +
-          'median. Five times over a $100k hourly floor sent roughly one to two messages per pool ' +
-          'per day across a seven day sample; raising the multiple to eight roughly halves that.'
+          'median. Starring pools for change reports narrows spikes to those pools too. Five ' +
+          'times over a $100k hourly floor sent roughly one to two messages per pool per day ' +
+          'across a seven day sample; raising the multiple to eight roughly halves that.'
         }
       >
         <Field label="Spike multiple">
