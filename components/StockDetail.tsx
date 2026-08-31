@@ -5,6 +5,7 @@ import { StockVolumeChart } from './StockVolumeChart'
 import { stockTicker } from '@/lib/domain/stockTokens'
 import {
   aggregateSeries,
+  shareOfTotal,
   hourlyReadings,
   type VolumeBucket,
   type VolumeHistory,
@@ -22,13 +23,27 @@ const money = (value: number): string => {
 const shortAddress = (value: string) =>
   value.length > 10 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value
 
-const clockTime = (ms: number) =>
-  new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Asia/Jakarta',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).format(new Date(ms))
+/**
+ * How long ago a trade landed.
+ *
+ * Relative rather than a wall clock: the question a trade list answers is whether this is
+ * happening now, and "14:32:08" only answers that if the reader knows what time it is.
+ */
+const timeAgo = (ms: number, now: number): string => {
+  const seconds = Math.max(0, Math.round((now - ms) / 1000))
+  if (seconds < 60) return `${seconds}s ago`
+
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+
+  return `${Math.round(hours / 24)}d ago`
+}
+
+/** How often an open row re-reads its pool. Fast enough to watch, slow enough to be one request. */
+const TRADE_POLL_MS = 5_000
 
 /** A drawn arrow, so an external link is not marked with a text glyph. */
 const ExternalMark = () => (
@@ -53,13 +68,16 @@ export const StockDetail = ({ ticker, pools, byPool }: Props) => {
   const [pool, setPool] = useState<PoolRow>(pools[0])
   const [trades, setTrades] = useState<Trade[] | null>(null)
   const [failed, setFailed] = useState(false)
+  // Stamped when a batch lands, so every row ages from the same instant.
+  const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
     let current = true
     setTrades(null)
     setFailed(false)
 
-    void fetch('/api/pool/trades', {
+    const read = () => {
+      void fetch('/api/pool/trades', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -69,31 +87,50 @@ export const StockDetail = ({ ticker, pools, byPool }: Props) => {
         stockIsToken0: stockTicker(pool.token0Address) !== null,
       }),
     })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((payload: unknown) => {
-        if (!current) return
-        const rows = (payload as { trades?: unknown } | null)?.trades
-        if (Array.isArray(rows)) setTrades(rows)
-        else setFailed(true)
-      })
-      .catch(() => current && setFailed(true))
+        .then((response) => (response.ok ? response.json() : null))
+        .then((payload: unknown) => {
+          if (!current) return
+          const rows = (payload as { trades?: unknown } | null)?.trades
+          if (Array.isArray(rows)) {
+            setTrades(rows)
+            setNow(Date.now())
+            setFailed(false)
+          } else if (trades === null) {
+            // A failed refresh leaves the last good list on screen rather than blanking it.
+            setFailed(true)
+          }
+        })
+        .catch(() => current && trades === null && setFailed(true))
+    }
+
+    read()
+    const timer = setInterval(read, TRADE_POLL_MS)
 
     // Ignoring a response for a pool the reader has already moved off keeps the panel honest.
     return () => {
       current = false
+      clearInterval(timer)
     }
+    // `trades` is read only to decide whether a failure should blank the list, and including it
+    // would restart the poll on every refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pool])
 
   // The ticker's own series, summed across its pools, so the detail chart matches the row.
   const own: VolumeHistory = Object.fromEntries(
     pools.map((entry) => [entry.poolId.toLowerCase(), byPool[entry.poolId.toLowerCase()] ?? []]),
   )
+  const tickerSeries = aggregateSeries(own)
+
   const selectedSeries: VolumeBucket[] | null = (() => {
     const buckets = byPool[pool.poolId.toLowerCase()]
     if (buckets === undefined) return null
     const readings = hourlyReadings(buckets)
     return readings.length > 0 ? readings : null
   })()
+
+  const share = shareOfTotal(tickerSeries, selectedSeries)
+  const poolShare = share === null ? null : share < 1 ? share.toFixed(2) : share.toFixed(1)
 
   return (
     <div className="space-y-4 border-t border-line bg-canvas/40 px-4 py-4">
@@ -160,11 +197,28 @@ export const StockDetail = ({ ticker, pools, byPool }: Props) => {
       </div>
 
       <StockVolumeChart
-        aggregate={aggregateSeries(own)}
+        aggregate={tickerSeries}
         aggregateLabel={`All ${ticker} pools`}
         selected={selectedSeries}
         selectedLabel={pool.pair}
       />
+
+      {selectedSeries !== null ? (
+        <div>
+          <StockVolumeChart
+            aggregate={selectedSeries}
+            selected={null}
+            selectedLabel={null}
+            aggregateLabel={pool.pair}
+            compact
+          />
+          <p className="mt-1.5 text-[11px] leading-relaxed text-ink-ghost">
+            {pool.pair} on its own scale. It is{' '}
+            {poolShare === null ? 'a fraction of' : `${poolShare}% of`} {ticker} volume over these
+            hours, which is a sliver against the axis above.
+          </p>
+        </div>
+      ) : null}
 
       <div>
         <h3 className="mb-2 text-[10px] uppercase tracking-[0.12em] text-ink-ghost">
@@ -192,7 +246,7 @@ export const StockDetail = ({ ticker, pools, byPool }: Props) => {
                 {trades.map((trade, index) => (
                   <tr key={`${trade.timestampMs}-${index}`} className="border-t border-line/50">
                     <td className="px-3 py-1 font-mono tabular-nums text-ink-ghost">
-                      {clockTime(trade.timestampMs)}
+                      {timeAgo(trade.timestampMs, now)}
                     </td>
                     <td
                       className={`px-3 py-1 ${trade.side === 'buy' ? 'text-[var(--gain)]' : 'text-[var(--risk)]'}`}
@@ -212,8 +266,8 @@ export const StockDetail = ({ ticker, pools, byPool }: Props) => {
           </div>
         )}
         <p className="mt-1.5 text-[11px] text-ink-ghost">
-          Fifty most recent swaps, read when this row opened. That is minutes on a busy pool and
-          days on a quiet one.
+          Fifty most recent swaps, refreshed every five seconds. That span is minutes on a busy
+          pool and days on a quiet one.
         </p>
       </div>
     </div>

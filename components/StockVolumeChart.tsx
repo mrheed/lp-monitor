@@ -4,6 +4,8 @@ import { useMemo, useState } from 'react'
 import { HOUR_MS, type VolumeBucket } from '@/lib/domain/volumeHistory'
 
 const PLOT_HEIGHT = 200
+/** A small multiple sits under the total, so it is shorter but keeps the same time axis. */
+const COMPACT_HEIGHT = 96
 const CHART_WIDTH = 960
 /** Room on the right for the value scale, which sits there so the newest bars stay unobstructed. */
 const SCALE_WIDTH = 62
@@ -121,6 +123,14 @@ type Props = {
   selectedLabel: string | null
   /** What the total series is. Defaults to every stock pool; a detail view names its ticker. */
   aggregateLabel?: string
+  /**
+   * Draw shorter, for a small multiple.
+   *
+   * A selection two orders of magnitude below the total is a sliver on the total's axis, and a
+   * second y scale on one chart is the mistake this avoids. The selection gets its own chart and
+   * its own labelled axis instead, so its shape reads without its magnitude being overstated.
+   */
+  compact?: boolean
 }
 
 /**
@@ -135,7 +145,9 @@ export const StockVolumeChart = ({
   selected,
   selectedLabel,
   aggregateLabel = 'All stock pools',
+  compact = false,
 }: Props) => {
+  const plotHeight = compact ? COMPACT_HEIGHT : PLOT_HEIGHT
   const [hovered, setHovered] = useState<number | null>(null)
 
   // Bars scale to the top gridline rather than to the tallest bar, so the axis ends on a labelled
@@ -149,12 +161,12 @@ export const StockVolumeChart = ({
   const axisMax = ticks[ticks.length - 1]
 
   const total = useMemo(
-    () => chartBars(aggregate, PLOT_WIDTH, PLOT_HEIGHT, axisMax),
-    [aggregate, axisMax],
+    () => chartBars(aggregate, PLOT_WIDTH, plotHeight, axisMax),
+    [aggregate, axisMax, plotHeight],
   )
   const overlay = useMemo(
-    () => (selected ? chartBars(selected, PLOT_WIDTH, PLOT_HEIGHT, axisMax) : null),
-    [selected, axisMax],
+    () => (selected ? chartBars(selected, PLOT_WIDTH, plotHeight, axisMax) : null),
+    [selected, axisMax, plotHeight],
   )
 
   if (aggregate.length === 0) {
@@ -174,7 +186,13 @@ export const StockVolumeChart = ({
       ? (overlay.bars.find((bar) => bar.bucket.hourEndMs === active.bucket.hourEndMs) ?? null)
       : null
 
-  /** Nearest bar to the pointer, so the readout follows the cursor without needing a direct hit. */
+  /**
+   * Nearest bar to the pointer, so the readout follows the cursor without needing a direct hit.
+   *
+   * Both this and the tooltip below treat the element box as the viewBox. That holds only because
+   * the svg is sized by width alone: give it a fixed height and the default preserveAspectRatio
+   * centres a letterboxed drawing inside the box, and every reading drifts by the margin.
+   */
   const trackPointer = (event: React.PointerEvent<SVGSVGElement>) => {
     const box = event.currentTarget.getBoundingClientRect()
     const x = ((event.clientX - box.left) / box.width) * CHART_WIDTH
@@ -215,8 +233,8 @@ export const StockVolumeChart = ({
 
       <div className="relative">
         <svg
-          viewBox={`0 0 ${CHART_WIDTH} ${PLOT_HEIGHT + TOP_PAD + 22}`}
-          className="block h-56 w-full touch-none"
+          viewBox={`0 0 ${CHART_WIDTH} ${plotHeight + TOP_PAD + 22}`}
+          className="block w-full touch-none"
           role="img"
           aria-label={`Hourly volume across stock pools over ${aggregate.length} hours, peaking at ${money(dataMax)}`}
           onPointerMove={trackPointer}
@@ -231,7 +249,7 @@ export const StockVolumeChart = ({
                 x={bar.x - BAR_GAP / 2}
                 y={0}
                 width={bar.width + BAR_GAP}
-                height={PLOT_HEIGHT}
+                height={plotHeight}
                 fill="var(--ink)"
                 opacity={0.035}
               />
@@ -239,7 +257,7 @@ export const StockVolumeChart = ({
           )}
 
           {ticks.map((value) => {
-            const y = PLOT_HEIGHT - (axisMax > 0 ? (value / axisMax) * PLOT_HEIGHT : 0)
+            const y = plotHeight - (axisMax > 0 ? (value / axisMax) * plotHeight : 0)
             return (
               <g key={value}>
                 <line
@@ -293,7 +311,7 @@ export const StockVolumeChart = ({
               x1={active.x + active.width / 2}
               x2={active.x + active.width / 2}
               y1={0}
-              y2={PLOT_HEIGHT}
+              y2={plotHeight}
               stroke="var(--line-strong)"
               strokeWidth={1}
               shapeRendering="crispEdges"
@@ -305,7 +323,7 @@ export const StockVolumeChart = ({
               <text
                 key={`tick-${bar.bucket.hourEndMs}`}
                 x={bar.x + bar.width / 2}
-                y={PLOT_HEIGHT + 15}
+                y={plotHeight + 15}
                 textAnchor="middle"
                 className="fill-[var(--ink-ghost)] font-mono text-[10px] tabular-nums"
               >

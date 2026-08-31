@@ -11,12 +11,17 @@ const LINKS = [
   { href: '/deploy', label: 'Deploy hook' },
 ] as const
 
-/** Global top bar: a ringed-dot brand mark, uppercase page links, and the wallet connect button. */
+/**
+ * Global top bar: a ringed-dot brand mark, uppercase page links, and the wallet connect button.
+ *
+ * Opaque rather than translucent with a blur. The blur was decoration, not a specific effect, and
+ * a half-transparent bar over a scrolling table smears the figures underneath it.
+ */
 export const Navbar = () => {
   const pathname = usePathname()
 
   return (
-    <header className="sticky top-0 z-40 border-b border-line bg-surface/80 backdrop-blur-md">
+    <header className="sticky top-0 z-40 border-b border-line bg-surface">
       <nav className="mx-auto flex max-w-[1560px] flex-wrap items-center gap-x-6 gap-y-3 px-4 py-4 sm:px-6">
         <Link
           href="/"

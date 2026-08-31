@@ -8,6 +8,7 @@ import {
   medianRate,
   mergeBucket,
   rateUsdPerHour,
+  shareOfTotal,
 } from './volumeHistory'
 
 /** A bucket with the fields a test cares about, defaulting the rest. */
@@ -119,5 +120,27 @@ describe('medianRate', () => {
 
   it('is zero with nothing to measure', () => {
     expect(medianRate([])).toBe(0)
+  })
+})
+
+describe('shareOfTotal', () => {
+  it('measures the part against the total over the hours the part covers', () => {
+    const total = [bucket(HOUR_MS, 100), bucket(2 * HOUR_MS, 100)]
+    const part = [bucket(HOUR_MS, 25)]
+
+    // 25 of the 100 traded in the one hour the part covers, not of the 200 across both.
+    expect(shareOfTotal(total, part)).toBe(25)
+  })
+
+  it('is null when nothing is selected', () => {
+    expect(shareOfTotal([bucket(HOUR_MS, 100)], null)).toBeNull()
+  })
+
+  it('is null rather than infinite when the total is zero over those hours', () => {
+    expect(shareOfTotal([bucket(HOUR_MS, 0)], [bucket(HOUR_MS, 5)])).toBeNull()
+  })
+
+  it('handles a part covering hours the total does not', () => {
+    expect(shareOfTotal([bucket(HOUR_MS, 100)], [bucket(9 * HOUR_MS, 5)])).toBeNull()
   })
 })

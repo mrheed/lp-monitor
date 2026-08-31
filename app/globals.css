@@ -335,3 +335,34 @@ body {
 .editorial .rounded-\[1px\] {
   border-radius: 0;
 }
+
+/*
+ * The navbar sits in the root layout, above the route segment, so it cannot live inside the
+ * editorial wrapper. It takes the same palette from the page below instead, or a dark bar would
+ * sit on warm paper with a hard seam between them.
+ */
+body:has(.editorial) header {
+  color-scheme: light;
+
+  --canvas: #f1eadf;
+  --surface: #f1eadf;
+  --surface-raised: #e8ddcc;
+
+  --ink: #151513;
+  --ink-muted: #6f685f;
+  --ink-faint: #857d73;
+  --ink-ghost: #948c82;
+
+  --line: rgba(21, 21, 19, 0.2);
+  --line-strong: rgba(21, 21, 19, 0.42);
+
+  --accent: #8f4438;
+  --accent-dim: #a86254;
+  --accent-ink: #f1eadf;
+}
+
+/* Sparse and quiet, per the editorial system: the rule under the bar does the dividing. */
+body:has(.editorial) header nav {
+  padding-top: 20px;
+  padding-bottom: 20px;
+}

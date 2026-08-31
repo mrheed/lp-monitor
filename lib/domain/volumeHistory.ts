@@ -141,3 +141,25 @@ export const aggregateSeries = (history: VolumeHistory): VolumeBucket[] => {
 
   return [...byHour.values()].sort((a, b) => a.hourEndMs - b.hourEndMs)
 }
+
+/**
+ * What fraction of a total a subset accounts for, as a percentage.
+ *
+ * Compared only over the hours the subset covers, so a pool sampled for six hours is not measured
+ * against two days of chain volume. Stated as a figure because it is the question a second y
+ * scale on one chart would be answering, and a second scale answers it wrongly.
+ */
+export const shareOfTotal = (
+  total: VolumeBucket[],
+  part: VolumeBucket[] | null,
+): number | null => {
+  if (part === null || part.length === 0) return null
+
+  const hours = new Set(part.map((bucket) => bucket.hourEndMs))
+  const totalUsd = total
+    .filter((bucket) => hours.has(bucket.hourEndMs))
+    .reduce((sum, bucket) => sum + bucket.volumeUsd, 0)
+  if (totalUsd <= 0) return null
+
+  return (part.reduce((sum, bucket) => sum + bucket.volumeUsd, 0) / totalUsd) * 100
+}

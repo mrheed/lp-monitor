@@ -7,6 +7,7 @@ import { groupByStock } from '@/lib/domain/stockGroups'
 import type { PoolRow } from '@/lib/types'
 import {
   aggregateSeries,
+  shareOfTotal,
   hourlyReadings,
   isVolumeBucket,
   type VolumeBucket,
@@ -67,6 +68,7 @@ export const readVolumePayload = (value: unknown): VolumeSeries | null => {
   return { aggregate, byPool }
 }
 
+
 type Props = {
   aggregate: VolumeBucket[]
   byPool: VolumeHistory
@@ -123,6 +125,11 @@ export const StockVolumePanel = ({ aggregate, byPool, rows }: Props) => {
     return summed.length > 0 ? summed : null
   }, [groups, selected, series.byPool])
 
+  // Stated outright rather than left to be read off two axes, which is the thing a second scale
+  // on one chart would get wrong.
+  const share = shareOfTotal(series.aggregate, overlay)
+  const sharePercent = share === null ? null : share < 1 ? share.toFixed(2) : share.toFixed(1)
+
   return (
     <div className="space-y-3">
       <StockVolumeChart
@@ -130,6 +137,16 @@ export const StockVolumePanel = ({ aggregate, byPool, rows }: Props) => {
         selected={overlay}
         selectedLabel={selected}
       />
+
+      {overlay !== null && selected !== null ? (
+        <div>
+          <StockVolumeChart aggregate={overlay} selected={null} selectedLabel={null} aggregateLabel={selected} compact />
+          <p className="mt-1.5 px-1 text-[11px] leading-relaxed text-ink-ghost">
+            {selected} on its own scale, because it is {sharePercent === null ? 'a fraction of' : `${sharePercent}% of`}{' '}
+            total stock volume over these hours and would otherwise be a sliver on the axis above.
+          </p>
+        </div>
+      ) : null}
 
       <StockTable
         groups={groups}
