@@ -17,10 +17,10 @@
  */
 export const ROBINHOOD_FALLBACK_RPCS = ['https://rpc.mainnet.chain.robinhood.com'] as const
 
-/** A trimmed environment value, or null when it is absent or blank. */
-const configured = (name: string): string | null => {
-  const value = process.env[name]?.trim()
-  return value ? value : null
+/** A trimmed value, or null when it is absent or blank. */
+const usable = (value: string | undefined): string | null => {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : null
 }
 
 /**
@@ -33,7 +33,16 @@ const configured = (name: string): string | null => {
  * page can read the key. Set the private one alone unless the browser genuinely needs it too.
  */
 export const robinhoodRpcUrls = (): string[] => {
-  const preferred = configured('ROBINHOOD_RPC_URL') ?? configured('NEXT_PUBLIC_ROBINHOOD_RPC_URL')
+  /*
+   * Read as literal member expressions, never `process.env[name]`.
+   *
+   * Next substitutes NEXT_PUBLIC_ variables into the client bundle at build time, and only where
+   * it can see the name in the source. A dynamic key is invisible to that pass, so in the browser
+   * it resolved to undefined and the wallet silently fell through to the public endpoint however
+   * the environment was set.
+   */
+  const preferred =
+    usable(process.env.ROBINHOOD_RPC_URL) ?? usable(process.env.NEXT_PUBLIC_ROBINHOOD_RPC_URL)
   if (preferred === null) return [...ROBINHOOD_FALLBACK_RPCS]
 
   // Deduplicated so configuring one of the public endpoints explicitly does not list it twice.

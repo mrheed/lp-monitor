@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ROBINHOOD_FALLBACK_RPCS, robinhoodRpcUrls } from './rpc'
 
@@ -43,5 +45,21 @@ describe('robinhoodRpcUrls', () => {
     process.env[PRIVATE] = ROBINHOOD_FALLBACK_RPCS[0]
 
     expect(robinhoodRpcUrls()).toEqual([...ROBINHOOD_FALLBACK_RPCS])
+  })
+})
+
+/*
+ * A behavioural test cannot catch this: these run in Node, where a dynamic process.env lookup
+ * works fine. The failure only appears in a browser bundle, where Next has to have seen the
+ * variable name in the source to substitute it. So the guard is on the source itself.
+ */
+describe('client bundle safety', () => {
+  it('reads NEXT_PUBLIC_ variables by literal name, so Next can inline them', () => {
+    const source = readFileSync(fileURLToPath(new URL('./rpc.ts', import.meta.url)), 'utf8')
+    // Comments explain the rule and naturally quote the thing it forbids, so judge the code only.
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '')
+
+    expect(code).toContain('process.env.NEXT_PUBLIC_ROBINHOOD_RPC_URL')
+    expect(code).not.toMatch(/process\.env\[/)
   })
 })
