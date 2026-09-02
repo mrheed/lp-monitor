@@ -19,7 +19,7 @@ import {
 } from '@/lib/domain/volumeHistory'
 
 /** What the chart draws: the total across pools, and each pool's own series. */
-type VolumeSeries = { aggregate: VolumeBucket[]; byPool: VolumeHistory }
+type VolumeSeries = { aggregate: VolumeBucket[]; byPool: VolumeHistory; missing: number }
 
 /** Every bucket in a parsed array, or null if any of them is not a bucket. */
 const readSeries = (value: unknown): VolumeBucket[] | null => {
@@ -54,7 +54,11 @@ export const readVolumePayload = (value: unknown): VolumeSeries | null => {
     byPool[poolId.toLowerCase()] = buckets
   }
 
-  return { aggregate, byPool }
+  return {
+    aggregate,
+    byPool,
+    missing: typeof payload.missing === 'number' ? payload.missing : 0,
+  }
 }
 
 
@@ -77,7 +81,7 @@ export const StockVolumePanel = ({ aggregate, byPool, rows }: Props) => {
   // route. The page renders once while the watcher samples every minute, so without the poll the
   // chart froze at page load, and a first visit landing before any sampling stayed empty for the
   // whole session however long it was left open.
-  const [series, setSeries] = useState<VolumeSeries>({ aggregate, byPool })
+  const [series, setSeries] = useState<VolumeSeries>({ aggregate, byPool, missing: 0 })
 
   const [range, setRange] = useState<VolumeRange>(DEFAULT_RANGE)
   const [loading, setLoading] = useState(false)
@@ -161,6 +165,13 @@ export const StockVolumePanel = ({ aggregate, byPool, rows }: Props) => {
         {loading ? (
           <span className="ml-2 text-[10px] uppercase tracking-[0.12em] text-ink-ghost">
             reading
+          </span>
+        ) : series.missing > 0 ? (
+          <span
+            className="ml-2 text-[10px] uppercase tracking-[0.12em] text-ink-muted"
+            title="Uniswap's volume history has no series for these pools, so their volume is not in the total above. v4 history has been returning errors upstream."
+          >
+            {series.missing} of {rows.length} pools missing
           </span>
         ) : null}
       </div>

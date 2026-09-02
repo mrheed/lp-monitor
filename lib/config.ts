@@ -266,3 +266,15 @@ export const GRAPH_HISTORY_CONCURRENCY = 12
  * of a step stale, and it turns a page reload from two hundred requests into none.
  */
 export const GRAPH_HISTORY_TTL_MS = 5 * 60_000
+
+/**
+ * Attempts at one Krystal read before giving up.
+ *
+ * The feed is served through Cloudflare from several addresses, and a single one timing out while
+ * the others answer is routine. On a cold cache there is no stored value to fall back to, so one
+ * blip took the whole page to a 500.
+ */
+export const KRYSTAL_MAX_ATTEMPTS = 3
+
+/** Linear backoff between those attempts. */
+export const KRYSTAL_RETRY_BACKOFF_MS = 800

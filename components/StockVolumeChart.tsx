@@ -163,6 +163,7 @@ export const StockVolumeChart = ({
     [aggregate],
   )
   const ticks = useMemo(() => valueTicks(dataMax), [dataMax])
+
   const axisMax = ticks[ticks.length - 1]
 
   const total = useMemo(
@@ -173,6 +174,28 @@ export const StockVolumeChart = ({
     () => (selected ? chartBars(selected, PLOT_WIDTH, plotHeight, axisMax) : null),
     [selected, axisMax, plotHeight],
   )
+  /**
+   * Time labels, one per distinct value, on the first bar that carries it.
+   *
+   * Labelling every nth bar instead produced runs of the same word: at six hourly steps a weekday
+   * label repeats four times before it changes. Thinned afterwards so a dense range does not
+   * print a label per bar, but only ever by dropping whole labels, never by splitting a day.
+   */
+  const ticks_ = useMemo(() => {
+    const all: { hourEndMs: number; x: number; label: string }[] = []
+    let previous: string | null = null
+
+    for (const bar of total.bars) {
+      const label = localParts(bar.bucket.hourEndMs - bar.bucket.spanMs, rangeAxisFormat(range))
+      if (label === previous) continue
+      previous = label
+      all.push({ hourEndMs: bar.bucket.hourEndMs, x: bar.x + bar.width / 2, label })
+    }
+
+    // Roughly one label per eighty pixels of plot, so they never collide.
+    const stride = Math.max(1, Math.ceil(all.length / Math.floor(PLOT_WIDTH / 80)))
+    return all.filter((_, index) => index % stride === 0)
+  }, [total.bars, range])
 
   if (aggregate.length === 0) {
     return (
@@ -334,19 +357,17 @@ export const StockVolumeChart = ({
             />
           ) : null}
 
-          {total.bars.map((bar, index) =>
-            index % 6 === 0 ? (
-              <text
-                key={`tick-${bar.bucket.hourEndMs}`}
-                x={bar.x + bar.width / 2}
-                y={plotHeight + 15}
-                textAnchor="middle"
-                className="fill-[var(--ink-ghost)] font-mono text-[10px] tabular-nums"
-              >
-                {localParts(bar.bucket.hourEndMs - bar.bucket.spanMs, rangeAxisFormat(range))}
-              </text>
-            ) : null,
-          )}
+          {ticks_.map((tick) => (
+            <text
+              key={`tick-${tick.hourEndMs}`}
+              x={tick.x}
+              y={plotHeight + 15}
+              textAnchor="middle"
+              className="fill-[var(--ink-ghost)] font-mono text-[10px] tabular-nums"
+            >
+              {tick.label}
+            </text>
+          ))}
           </g>
         </svg>
 

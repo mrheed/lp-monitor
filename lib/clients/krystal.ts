@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { enabledChains } from '../chains'
+import { KRYSTAL_MAX_ATTEMPTS, KRYSTAL_RETRY_BACKOFF_MS } from '../config'
 import { krystalTopPoolsSchema, type KrystalPool } from '../types'
 import type { DirectPosition, VaultPool } from '../domain/positions'
 
@@ -132,13 +133,43 @@ const fetchThrough = async (url: string): Promise<Fetched> => {
   }
 }
 
+/**
+ * Whether a failure is worth trying again.
+ *
+ * A connection that timed out or was reset says nothing about the request, only about the moment.
+ * A Cloudflare challenge or a 4xx does, and repeating either just spends the rate limit that
+ * caused it. The feed is served through Cloudflare from several addresses, so a single address
+ * timing out while the others answer is routine rather than an outage.
+ */
+const worthRetrying = (error: unknown): boolean => {
+  if (error instanceof ChallengeError) return false
+  if (!(error instanceof Error)) return false
+  if (error.message.startsWith('Krystal request failed: 4')) return false
+  return true
+}
+
 const getJson = async (url: string) => {
-  const response = await fetchThrough(url)
+  let last: unknown
 
-  if (response.contentType.includes('text/html')) throw new ChallengeError(url)
-  if (!response.ok) throw new Error(`Krystal request failed: ${response.status} ${url}`)
+  for (let attempt = 0; attempt < KRYSTAL_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetchThrough(url)
 
-  return response.json()
+      if (response.contentType.includes('text/html')) throw new ChallengeError(url)
+      if (!response.ok) throw new Error(`Krystal request failed: ${response.status} ${url}`)
+
+      return await response.json()
+    } catch (error) {
+      last = error
+      if (!worthRetrying(error) || attempt === KRYSTAL_MAX_ATTEMPTS - 1) throw error
+
+      // Backs off linearly. The failure being retried is a timeout, so the next attempt already
+      // waited out its own connect timeout before arriving here.
+      await new Promise((resolve) => setTimeout(resolve, KRYSTAL_RETRY_BACKOFF_MS * (attempt + 1)))
+    }
+  }
+
+  throw last
 }
 
 /** Fetches every pool the feed lists for one chain, newest stats included. */
