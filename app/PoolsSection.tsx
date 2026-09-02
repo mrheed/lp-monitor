@@ -1,42 +1,68 @@
 import { PoolTable } from '@/components/PoolTable'
 import { getPoolsSnapshot } from '@/lib/domain/pools'
 
+const money = (value: number): string =>
+  value >= 1_000_000 ? `$${(value / 1_000_000).toFixed(1)}M` : `$${Math.round(value / 1_000)}k`
+
 /**
- * The pool table and the figures that describe it, split out so the page can stream.
+ * The pool figures and table, laid out as the same ruled sheet the stocks page uses.
  *
- * The snapshot measures trade rates one request per pool, which takes tens of seconds on a cold
- * cache. Rendering it inside a Suspense boundary lets the shell reach the browser immediately
- * instead of holding the whole response until the last upstream call returns.
+ * Split from the page so it can stream: the snapshot measures trade rates one request per pool,
+ * which takes tens of seconds on a cold cache, and the masthead should not wait for it.
  */
 export const PoolsSection = async () => {
   const { rows, totalPools, walletsTracked, scoredCount, warnings, fetchedAt } =
     await getPoolsSnapshot()
 
+  const fees24h = rows.reduce((total, row) => total + row.fees24hUsd, 0)
+  const tvl = rows.reduce((total, row) => total + row.tvlUsd, 0)
+
+  /** The standing figures, rule-divided rather than carded, mirroring the stocks page. */
+  const figures: [string, string][] = [
+    ['Fees earned, 24h', money(fees24h)],
+    ['Liquidity', money(tvl)],
+    ['Pools scored', `${scoredCount.toLocaleString()} of ${totalPools.toLocaleString()}`],
+    ['Wallets checked', walletsTracked.toLocaleString()],
+  ]
+
   return (
     <>
-      <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink0">
-        Uniswap on Robinhood Chain. {totalPools.toLocaleString()} pools, of which{' '}
-        {scoredCount.toLocaleString()} are scored on fee rate, thin TVL, trade rate, trader count
-        and low volatility.
-        {walletsTracked > 0
-          ? ` Checking ${walletsTracked} wallet${walletsTracked === 1 ? '' : 's'}.`
-          : null}
-      </p>
-      <p className="mt-2 max-w-3xl text-xs leading-relaxed text-ink-ghost">
-        Updated {new Date(fetchedAt).toLocaleTimeString()}. Hover a score for its five components,
-        or a projected figure for how the deposit was applied. In means you hold the pool now, Past
-        means you closed it.
-      </p>
+      <section className="grid border-b border-line sm:grid-cols-2 lg:grid-cols-4">
+        {figures.map(([label, value], index) => (
+          <div
+            key={label}
+            className={`px-6 py-6 sm:px-10 ${index > 0 ? 'border-t border-line sm:border-t-0 sm:border-l' : ''}`}
+          >
+            <p className="text-[10px] uppercase tracking-[0.14em] text-ink-muted">{label}</p>
+            <p className="display mt-3 text-[34px] text-ink">{value}</p>
+          </div>
+        ))}
+      </section>
+
+      <section className="border-b border-line px-6 py-6 sm:px-10">
+        <p className="max-w-[52ch] text-[13px] leading-relaxed text-ink-muted">
+          Every Uniswap pool on the chain, scored on fee rate, thin liquidity, trade rate, trader
+          count and low volatility. Hover a score for its five components, or a projected figure
+          for how the deposit was applied. In means a tracked wallet holds the pool now; Past
+          means it closed.
+        </p>
+        <p className="mt-2 text-[11px] text-ink-ghost">
+          Feed read{' '}
+          {new Date(fetchedAt).toLocaleTimeString('en-GB', { timeZone: 'Asia/Jakarta' })} WIB
+        </p>
+      </section>
 
       {warnings.length > 0 ? (
-        <ul className="mb-8 mt-6 space-y-1.5 rounded border border-caution/30 bg-caution/5 px-4 py-3 text-sm leading-relaxed text-ink-muted">
-          {warnings.map((warning) => (
-            <li key={warning}>{warning}</li>
-          ))}
-        </ul>
+        <section className="border-b border-line px-6 py-4 sm:px-10">
+          <ul className="space-y-1.5 text-[13px] leading-relaxed text-caution">
+            {warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </section>
       ) : null}
 
-      <div className="mt-6 sm:mt-8">
+      <div className="px-6 py-8 sm:px-10">
         <PoolTable initialRows={rows} />
       </div>
     </>
