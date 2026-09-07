@@ -278,3 +278,13 @@ export const KRYSTAL_MAX_ATTEMPTS = 3
 
 /** Linear backoff between those attempts. */
 export const KRYSTAL_RETRY_BACKOFF_MS = 800
+
+/**
+ * Which upstream builds the pool table.
+ *
+ * `gmgn` uses GMGN alone. `krystal` uses the pool feed with Uniswap trade sampling, which is the
+ * only combination that carries fees, every pool per pair, and wallet positions. Set
+ * POOL_SOURCE=krystal to switch back; nothing about that path was removed.
+ */
+export const poolSource = (): 'gmgn' | 'krystal' =>
+  (process.env.POOL_SOURCE ?? 'gmgn').toLowerCase() === 'krystal' ? 'krystal' : 'gmgn'

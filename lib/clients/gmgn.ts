@@ -13,6 +13,64 @@ import type { TokenSecurity } from '../domain/tokenRisk'
  *
  * Nothing calls this outside a Node server, so the import resolves wherever it is reached.
  */
+/**
+ * Shortest gap between two calls to the API.
+ *
+ * Set from a real ban rather than a guess: eight concurrent calls returned
+ * `RATE_LIMIT_BANNED`, with the endpoint refusing every request from this IP for a stretch
+ * afterwards. Spacing requests is what keeps a full table read inside the allowance, and it
+ * matters more than parallelism because a ban stops every caller, not just the greedy one.
+ */
+const MIN_CALL_GAP_MS = 120
+
+/** How long to wait after a rate-limit refusal before trying again, doubling each time. */
+const RATE_LIMIT_BACKOFF_MS = 2_000
+
+/** Attempts per call, so one refusal is survivable and a persistent one still ends. */
+const RATE_LIMIT_ATTEMPTS = 3
+
+/** The instant the next call may start. Shared by every caller in the process. */
+let nextSlot = 0
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/** Waits for this call's turn, so concurrent callers still leave a gap between requests. */
+const takeSlot = async () => {
+  const now = Date.now()
+  const start = Math.max(now, nextSlot)
+  nextSlot = start + MIN_CALL_GAP_MS
+  if (start > now) await sleep(start - now)
+}
+
+/** Whether a failure was the API refusing for rate reasons rather than a real error. */
+const isRateLimited = (error: unknown): boolean => {
+  const text = error instanceof Error ? `${error.message}` : String(error)
+  return /RATE_LIMIT|429/i.test(text)
+}
+
+/**
+ * Runs the CLI with rate limiting, returning null for anything that fails.
+ *
+ * Every GMGN call in the app goes through here, so the spacing and the backoff apply to the
+ * whole process rather than to one feature.
+ */
+export const runGmgn = async (args: string[]): Promise<string | null> => {
+  for (let attempt = 0; attempt < RATE_LIMIT_ATTEMPTS; attempt += 1) {
+    await takeSlot()
+    try {
+      return await runCli(args)
+    } catch (error) {
+      if (!isRateLimited(error) || attempt === RATE_LIMIT_ATTEMPTS - 1) {
+        // A missing CLI, an unconfigured key, a timeout: the caller treats null as unread.
+        return null
+      }
+      await sleep(RATE_LIMIT_BACKOFF_MS * 2 ** attempt)
+    }
+  }
+
+  return null
+}
+
 const runCli = async (args: string[]): Promise<string> => {
   const { execFile } = await import(/* webpackIgnore: true */ 'node:child_process')
   const { promisify } = await import(/* webpackIgnore: true */ 'node:util')
@@ -101,7 +159,8 @@ export const fetchTokenSecurity = async (
   if (!isQueryableAddress(address)) return null
 
   try {
-    const stdout = await runCli(['token', 'security', '--chain', chain, '--address', address])
+    const stdout = await runGmgn(['token', 'security', '--chain', chain, '--address', address])
+    if (stdout === null) return null
 
     const parsed = securitySchema.safeParse(JSON.parse(stdout))
     if (!parsed.success) return null
@@ -146,11 +205,11 @@ const mapWithConcurrency = async <TIn, TOut>(
 /**
  * How many CLI processes to keep in flight.
  *
- * Each call spawns a process and takes about a second; three in parallel measured 1.25s against
- * 0.93s for one, so the endpoint parallelises well and the ceiling here is local process cost
- * rather than the API.
+ * Lowered from eight after eight concurrent calls earned a `RATE_LIMIT_BANNED` response that
+ * refused every later request from this IP. The endpoint parallelises fine locally; the ceiling
+ * is the API's allowance, which the shared gap in `runGmgn` is what actually enforces.
  */
-const GMGN_CONCURRENCY = 8
+const GMGN_CONCURRENCY = 3
 
 /** Reads several tokens at once, keyed by lowercased address. */
 export const fetchTokenSecurityBatch = async (
