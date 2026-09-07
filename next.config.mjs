@@ -22,7 +22,14 @@ const nextConfig = {
       // `crypto` joins fs for the same reason: @coinbase/cdp-sdk imports the builtin bare, and
       // the browser bundle has no polyfill. The importing utilities belong to CDP's server-side
       // API workflows, which the wallet connector path never calls.
-      config.resolve.fallback = { ...config.resolve.fallback, fs: false, crypto: false }
+      // `child_process` joins them: the security client reaches the CLI through it, and the
+      // alert watcher that imports it is compiled for edge as well as Node.
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        crypto: false,
+        child_process: false,
+      }
     }
 
     /*

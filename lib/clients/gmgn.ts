@@ -1,10 +1,29 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { z } from 'zod'
 import { chainById } from '../chains'
 import type { TokenSecurity } from '../domain/tokenRisk'
 
-const run = promisify(execFile)
+/**
+ * Runs the CLI, importing `node:child_process` only when a query actually happens.
+ *
+ * A static import broke the build. This module is reached from the alert watcher, which Next
+ * compiles for the edge runtime as well as for Node, and edge has no child_process: the bundler
+ * failed on the unhandled `node:` scheme before anything could run. `webpackIgnore` leaves the
+ * specifier alone entirely, which is the same treatment undici needed in the Krystal client for
+ * the same reason.
+ *
+ * Nothing calls this outside a Node server, so the import resolves wherever it is reached.
+ */
+const runCli = async (args: string[]): Promise<string> => {
+  const { execFile } = await import(/* webpackIgnore: true */ 'node:child_process')
+  const { promisify } = await import(/* webpackIgnore: true */ 'node:util')
+
+  const { stdout } = await promisify(execFile)('gmgn-cli', args, {
+    timeout: 20_000,
+    maxBuffer: 4 * 1024 * 1024,
+  })
+
+  return stdout
+}
 
 /**
  * GMGN's own name for each chain, which is not the numeric id.
@@ -82,11 +101,7 @@ export const fetchTokenSecurity = async (
   if (!isQueryableAddress(address)) return null
 
   try {
-    const { stdout } = await run(
-      'gmgn-cli',
-      ['token', 'security', '--chain', chain, '--address', address],
-      { timeout: 20_000, maxBuffer: 4 * 1024 * 1024 },
-    )
+    const stdout = await runCli(['token', 'security', '--chain', chain, '--address', address])
 
     const parsed = securitySchema.safeParse(JSON.parse(stdout))
     if (!parsed.success) return null
