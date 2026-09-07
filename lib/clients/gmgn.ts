@@ -23,6 +23,18 @@ const GMGN_CHAIN: Record<number, string> = {
 export const gmgnSupportsChain = (chainId: number): boolean => chainId in GMGN_CHAIN
 
 /**
+ * Whether a value is shaped like an address and therefore safe to pass as a CLI argument.
+ *
+ * This is a security boundary, not a formatting nicety. The address below becomes an element of
+ * an argv, and while `execFile` spawns no shell — so `;` and `$()` are inert — a value beginning
+ * with a dash is still read by the CLI as a FLAG rather than as the address: passing
+ * `--address --version` made gmgn-cli print its version and exit 0 instead of querying anything.
+ * The value arrives from a request body, so it is matched against the shape an address actually
+ * has rather than filtered for characters known to be dangerous.
+ */
+export const isQueryableAddress = (address: string): boolean => /^0x[0-9a-fA-F]{40}$/.test(address)
+
+/**
  * The security fields this tracker reads, as the CLI returns them.
  *
  * Everything is optional and nullable: GMGN returns null for a check it could not run, omits
@@ -66,6 +78,8 @@ export const fetchTokenSecurity = async (
 ): Promise<TokenSecurity | null> => {
   const chain = GMGN_CHAIN[chainId]
   if (!chain) return null
+  // Refused before the process is spawned: an unrecognised value is unchecked, never trusted.
+  if (!isQueryableAddress(address)) return null
 
   try {
     const { stdout } = await run(
@@ -127,7 +141,9 @@ const GMGN_CONCURRENCY = 8
 export const fetchTokenSecurityBatch = async (
   targets: { chainId: number; address: string }[],
 ): Promise<Map<string, TokenSecurity>> => {
-  const askable = targets.filter((target) => gmgnSupportsChain(target.chainId))
+  const askable = targets.filter(
+    (target) => gmgnSupportsChain(target.chainId) && isQueryableAddress(target.address),
+  )
 
   const entries = await mapWithConcurrency(askable, GMGN_CONCURRENCY, async (target) => {
     const security = await fetchTokenSecurity(target.chainId, target.address)

@@ -4,14 +4,23 @@ import { loadRiskFor } from '@/lib/domain/pools'
 
 export const dynamic = 'force-dynamic'
 
+/**
+ * An address, matched against the shape one actually has.
+ *
+ * The value ends up in a CLI argument vector, where anything starting with a dash is read as a
+ * flag rather than a value. The client refuses those too; rejecting them here as well means a
+ * malformed request fails as a 400 instead of silently returning "unchecked" for every pool.
+ */
+const addressSchema = z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'Expected a 20 byte hex address')
+
 const requestSchema = z.object({
   targets: z
     .array(
       z.object({
         poolId: z.string().min(1),
-        chainId: z.number(),
-        token0Address: z.string().min(1),
-        token1Address: z.string().min(1),
+        chainId: z.number().int().positive(),
+        token0Address: addressSchema,
+        token1Address: addressSchema,
       }),
     )
     .max(60),
