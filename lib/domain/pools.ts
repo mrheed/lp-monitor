@@ -2,6 +2,8 @@ import { cached, peekWithAge, remember } from '../cache'
 import { fetchTopPools, fetchWalletPositions } from '../clients/krystal'
 import { withBudget } from './budget'
 import { fetchActivity, type ActivityTarget } from '../clients/uniswap'
+import { fetchTokenSecurityBatch } from '../clients/gmgn'
+import { poolRisk, type TokenSecurity } from './tokenRisk'
 import {
   ACTIVITY_CACHE_TTL_MS,
   ACTIVITY_MAX_AGE_MS,
@@ -129,6 +131,7 @@ const toRow = (
     uniswapUrl: uniswapPoolUrl(pool.chainId, pool.poolAddress),
     age: estimatePoolAge(volumeWindows, firstSeenAt),
     ageMs: poolAgeSpanMs(volumeWindows, firstSeenAt),
+    risk: null,
     score: null,
     scoreParts: null,
   }
@@ -176,6 +179,67 @@ export const loadActivityFor = async (
 
   return Object.fromEntries(answers)
 }
+
+/**
+ * Reads security verdicts for a batch of pools, keyed by lowercased pool id.
+ *
+ * Deduplicated to tokens before fetching, since a pair shares its tokens with every other pool
+ * holding them: 5,244 pools reduce to 3,165 distinct tokens, and USDG alone appears in 873 of
+ * them. Cached for a day, because a contract's security properties change only when the
+ * contract does.
+ */
+export const loadRiskFor = async (
+  targets: { poolId: string; chainId: number; token0Address: string; token1Address: string }[],
+) => {
+  const wanted = new Map<string, { chainId: number; address: string }>()
+  for (const target of targets) {
+    for (const address of [target.token0Address, target.token1Address]) {
+      const key = `${target.chainId}:${address.toLowerCase()}`
+      if (!wanted.has(key)) wanted.set(key, { chainId: target.chainId, address })
+    }
+  }
+
+  const known = new Map<string, TokenSecurity | null>()
+  const missing: { chainId: number; address: string }[] = []
+
+  for (const [key, token] of wanted) {
+    const hit = peekWithAge<TokenSecurity | null>(riskKey(key))
+    if (hit === undefined) missing.push(token)
+    else known.set(key, hit.value)
+  }
+
+  if (missing.length > 0) {
+    const fetched = await fetchTokenSecurityBatch(missing)
+    for (const token of missing) {
+      const key = `${token.chainId}:${token.address.toLowerCase()}`
+      const security = fetched.get(token.address.toLowerCase()) ?? null
+      // A miss is cached too, but briefly: an unchecked token should not be re-asked on every
+      // scroll, and should become checkable again once the feed or the CLI recovers.
+      remember(riskKey(key), security, security === null ? RISK_MISS_TTL_MS : RISK_CACHE_TTL_MS)
+      known.set(key, security)
+    }
+  }
+
+  const answers: Record<string, ReturnType<typeof poolRisk>> = {}
+  for (const target of targets) {
+    const at = (address: string) => known.get(`${target.chainId}:${address.toLowerCase()}`) ?? null
+    answers[target.poolId.toLowerCase()] = poolRisk(
+      at(target.token0Address),
+      at(target.token1Address),
+    )
+  }
+
+  return answers
+}
+
+/** Cache key for one token's security reading, scoped by chain. */
+const riskKey = (key: string) => `risk:${key}`
+
+/** A security reading holds for a day; a contract's properties change only when it does. */
+const RISK_CACHE_TTL_MS = 24 * 60 * 60_000
+
+/** A failed reading is retried sooner, since the cause is usually the CLI rather than the token. */
+const RISK_MISS_TTL_MS = 10 * 60_000
 
 /**
  * Cache key for one pool's activity. Per pool, so a batch is never the unit of reuse.

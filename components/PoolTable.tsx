@@ -224,6 +224,39 @@ const SampledHeader = ({ children }: { children: ReactNode }) => (
   </span>
 )
 
+/**
+ * The security verdict for a pair, as a mark beside its name.
+ *
+ * Critical and caution earn a visible mark; clear draws nothing, because a badge on every safe
+ * row is noise that hides the few rows that matter. Unchecked draws a faint dash rather than
+ * nothing, so "not yet read" never reads as "passed" — this tracker twice ranked a token that
+ * burns its holders at the top of the table, and both times every figure on the row looked fine.
+ */
+const RiskBadge = ({ risk }: { risk?: { level: string; reasons: string[] } }) => {
+  if (!risk || risk.level === 'clear') return null
+
+  if (risk.level === 'unknown') {
+    return (
+      <span className="text-[10px] text-ink-ghost" title="Security not checked for this pair">
+        unchecked
+      </span>
+    )
+  }
+
+  const critical = risk.level === 'critical'
+
+  return (
+    <span
+      title={risk.reasons.join('\n')}
+      className={`rounded-[2px] border px-1 py-px text-[10px] uppercase tracking-wide ${
+        critical ? 'border-risk text-risk' : 'border-caution text-caution'
+      }`}
+    >
+      {critical ? 'unsafe' : 'caution'}
+    </span>
+  )
+}
+
 /** Reads the value a sort key refers to, unwrapping activity and inverting the ascending keys. */
 /**
  * Horizons the projection is offered over.
@@ -892,6 +925,49 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
 
   const onScreen = visible.slice(0, visibleCount)
 
+  /*
+   * Security verdicts for the rows on screen.
+   *
+   * Fetched for what is visible rather than for the whole table: a verdict costs a subprocess
+   * and the table holds thousands of pools, almost none of which get read. Cached per token on
+   * the server, so scrolling back over a row costs nothing.
+   */
+  const [risk, setRisk] = useState<Record<string, { level: string; reasons: string[] }>>({})
+  const riskAsked = useRef(new Set<string>())
+
+  useEffect(() => {
+    const due = onScreen.filter((row) => !riskAsked.current.has(row.poolId.toLowerCase()))
+    if (due.length === 0) return
+
+    for (const row of due) riskAsked.current.add(row.poolId.toLowerCase())
+    let cancelled = false
+
+    void fetch('/api/risk', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        targets: due.slice(0, 60).map(({ poolId, chainId, token0Address, token1Address }) => ({
+          poolId,
+          chainId,
+          token0Address,
+          token1Address,
+        })),
+      }),
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload: { risk?: Record<string, { level: string; reasons: string[] }> } | null) => {
+        if (!cancelled && payload?.risk) setRisk((current) => ({ ...current, ...payload.risk }))
+      })
+      .catch(() => {
+        // Leaving these unasked lets the next scroll retry them.
+        for (const row of due) riskAsked.current.delete(row.poolId.toLowerCase())
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [onScreen])
+
   /**
    * Returns pools to the queue after a failed or partial batch, giving up after a few tries.
    *
@@ -1404,7 +1480,10 @@ export const PoolTable = ({ initialRows }: { initialRows: PoolRow[] }) => {
                     ) : null}
                   </td>
                   <td className={CELL}>
-                    <div className="font-medium text-ink">{row.pair}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-medium text-ink">{row.pair}</span>
+                      <RiskBadge risk={risk[row.poolId.toLowerCase()]} />
+                    </div>
                     <div className={`${SUB} normal-case tracking-normal`}>
                       {chainLabel(row.chainId)} · {row.protocol}
                     </div>

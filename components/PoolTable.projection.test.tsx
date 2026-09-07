@@ -41,6 +41,7 @@ const row: PoolRow = {
   uniswapUrl: 'https://app.uniswap.org/explore/pools',
   age: '3d',
   ageMs: 3 * 24 * 60 * 60_000,
+  risk: null,
   score: 0.5,
   scoreParts: null,
 }

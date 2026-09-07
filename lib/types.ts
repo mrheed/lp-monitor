@@ -133,6 +133,11 @@ export type PoolRow = {
   age: string
   /** The same age as a numeric millisecond span, for filtering and sorting. */
   ageMs: number
+  /**
+   * Security verdict for the pair, from the token security feed. Null until checked; the UI
+   * shows that as unchecked rather than safe.
+   */
+  risk: { level: 'critical' | 'caution' | 'clear' | 'unknown'; reasons: string[] } | null
   /** Composite 0..1 rank across fee rate, thinness, trade rate, traders and calmness. */
   score: number | null
   scoreParts: {
