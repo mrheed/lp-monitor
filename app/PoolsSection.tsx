@@ -1,7 +1,5 @@
 import { PoolTable } from '@/components/PoolTable'
 import { getPoolsSnapshot } from '@/lib/domain/pools'
-import { getCachedGmgnSnapshot } from '@/lib/domain/gmgnPools'
-import { poolSource } from '@/lib/config'
 
 const money = (value: number): string =>
   value >= 1_000_000 ? `$${(value / 1_000_000).toFixed(1)}M` : `$${Math.round(value / 1_000)}k`
@@ -13,20 +11,15 @@ const money = (value: number): string =>
  * which takes tens of seconds on a cold cache, and the masthead should not wait for it.
  */
 export const PoolsSection = async () => {
-  // The upstream is chosen once here; every component below reads the same row shape either way.
-  const source = poolSource()
   const { rows, totalPools, walletsTracked, scoredCount, warnings, fetchedAt } =
-    source === 'gmgn' ? await getCachedGmgnSnapshot() : await getPoolsSnapshot()
+    await getPoolsSnapshot()
 
   const fees24h = rows.reduce((total, row) => total + row.fees24hUsd, 0)
   const tvl = rows.reduce((total, row) => total + row.tvlUsd, 0)
 
   /** The standing figures, rule-divided rather than carded, mirroring the stocks page. */
   const figures: [string, string][] = [
-    // GMGN publishes no fee figure, so the headline figure becomes the one it does publish.
-    source === 'gmgn'
-      ? ['Traded, 24h', money(rows.reduce((total, row) => total + row.volume24hUsd, 0))]
-      : ['Fees earned, 24h', money(fees24h)],
+    ['Fees earned, 24h', money(fees24h)],
     ['Liquidity', money(tvl)],
     ['Pools scored', `${scoredCount.toLocaleString()} of ${totalPools.toLocaleString()}`],
     ['Wallets checked', walletsTracked.toLocaleString()],
